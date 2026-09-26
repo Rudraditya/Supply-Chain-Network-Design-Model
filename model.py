@@ -90,6 +90,24 @@ def fixed_base_config(scenario: dict[str, Any], base_result: dict[str, Any]) -> 
     return c
 
 
+def resize_base_config(scenario: dict[str, Any], base_result: dict[str, Any]) -> dict[str, Any]:
+    """Keep Base locations open/closed, but choose S/M/L at each open site.
+
+    An explicit scenario closure is honored. Other scenario module mandates are
+    intentionally replaced, since this mode isolates the value of resizing the
+    installed footprint under the same demand, freight and material inputs.
+    """
+    c = copy.deepcopy(scenario)
+    for site, module in base_result["integrated_modules"].items():
+        if c["integrated_choices"].get(site) != "Closed":
+            c["integrated_choices"][site] = "Closed" if module == "Closed" else "Open"
+    for site, module in base_result["split_modules"].items():
+        if c["split_choices"].get(site) != "Closed":
+            c["split_choices"][site] = "Closed" if module == "Closed" else "Open"
+    c["name"] = scenario["name"] + " · resize Base locations"
+    return c
+
+
 def validate_config(cfg: dict[str, Any], data: dict[str, Any]) -> None:
     if len(cfg["demand_mt"]) != 12 or any(not np.isfinite(v) or v < 0 for v in cfg["demand_mt"]):
         raise ValueError("Enter 12 nonnegative market demands.")
@@ -101,12 +119,12 @@ def validate_config(cfg: dict[str, Any], data: dict[str, Any]) -> None:
         raise ValueError("Maximum utilization cannot exceed 100%.")
     for site in data["integrated_sites"]:
         sid = site["id"]
-        if cfg["integrated_choices"].get(sid) not in ("Optimize", "Closed", *MODULES):
+        if cfg["integrated_choices"].get(sid) not in ("Optimize", "Open", "Closed", *MODULES):
             raise ValueError(f"Invalid module choice for {sid}.")
         if not np.isfinite(cfg["limestone_rates"][sid]) or cfg["limestone_rates"][sid] < 0:
             raise ValueError(f"Limestone rate for {sid} must be nonnegative.")
     for site in data["split_sites"]:
-        if cfg["split_choices"].get(site["id"]) not in ("Optimize", "Closed", *MODULES):
+        if cfg["split_choices"].get(site["id"]) not in ("Optimize", "Open", "Closed", *MODULES):
             raise ValueError(f"Invalid module choice for {site['id']}.")
 
 
@@ -115,7 +133,7 @@ def _capacity_diagnostic(cfg: dict[str, Any], data: dict[str, Any]) -> list[str]
         choice = choices[site_id]
         if choice == "Closed":
             return 0
-        if choice == "Optimize":
+        if choice in ("Optimize", "Open"):
             return max(m[field] for m in modules)
         return next(m[field] for m in modules if m["id"] == choice)
 
@@ -219,10 +237,12 @@ def solve(cfg: dict[str, Any], data: dict[str, Any] | None = None,
         lo.append(low)
         hi.append(high)
 
-    for i in range(6):
-        add({yi[i, k]: 1 for k in range(3)}, high=1)
-    for g in range(4):
-        add({yg[g, k]: 1 for k in range(3)}, high=1)
+    for i, sid in enumerate(ids_i):
+        add({yi[i, k]: 1 for k in range(3)},
+            low=1 if cfg["integrated_choices"][sid] == "Open" else -np.inf, high=1)
+    for g, sid in enumerate(ids_g):
+        add({yg[g, k]: 1 for k in range(3)},
+            low=1 if cfg["split_choices"][sid] == "Open" else -np.inf, high=1)
     for m in range(12):
         row = {j: 1 for (i, mm), j in xi.items() if mm == m}
         row.update({j: 1 for (g, mm), j in xg.items() if mm == m})

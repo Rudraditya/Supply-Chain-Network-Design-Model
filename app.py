@@ -9,7 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from model import (PRESET_LABELS, MODULES, fixed_base_config,
+from model import (PRESET_LABELS, MODULES, fixed_base_config, resize_base_config,
                    load_case, preset, solve)
 
 st.set_page_config(
@@ -20,12 +20,26 @@ st.set_page_config(
 )
 st.markdown("""
 <style>
+    /* Keep the case readable even when the viewer has selected Streamlit's dark theme. */
+    .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+        background-color: #f6fafb !important;
+        color: #183344 !important;
+    }
+    [data-testid="stHeader"] {background-color: #f6fafb !important;}
     .block-container {max-width: 1460px; padding-top: 2.0rem; padding-bottom: 3rem;}
     h1, h2, h3 {color: #183344; letter-spacing: -0.025em;}
     [data-testid="stMetric"] {background: #ffffff; border: 1px solid #dce8e8;
         border-radius: 10px; padding: 16px 18px; min-height: 118px;}
-    [data-testid="stMetricLabel"] {color: #536d78;}
-    [data-testid="stSidebar"] {border-right: 1px solid #dce8e8;}
+    [data-testid="stMetricValue"], [data-testid="stMetricValue"] * {
+        color: #183344 !important;
+    }
+    [data-testid="stMetricLabel"], [data-testid="stMetricLabel"] * {
+        color: #45606b !important;
+    }
+    [data-testid="stSidebar"] {background-color: #edf5f3 !important;
+        border-right: 1px solid #dce8e8;}
+    button[data-baseweb="tab"] {color: #183344 !important;}
+    button[data-baseweb="tab"][aria-selected="true"] {color: #08736e !important;}
     .eyebrow {font-size: .78rem; font-weight: 700; letter-spacing: .14em;
         color: #08736e; margin-bottom: .4rem;}
     .intro {font-size: 1.08rem; color: #526778; max-width: 900px;}
@@ -68,6 +82,51 @@ def badge_rows(res: dict) -> pd.DataFrame:
     for s in DATA["split_sites"]:
         rows.append({"Facility": s["id"], "Location": s["name"], "Type": "Split grinder",
                      "Module": res["split_modules"][s["id"]]})
+    return pd.DataFrame(rows)
+
+
+def mode_comparison_rows(outcomes: dict[str, dict]) -> pd.DataFrame:
+    rows=[]
+    for label,result in outcomes.items():
+        rows.append({"Decision mode":label,"Status":status_label(result),
+                     "Annual cost ₹ cr":result["objective_cr"],
+                     "Cement lead km":result.get("cement_lead_km"),
+                     "Split grinding %":100*result["split_share"] if result["objective_cr"] is not None else None})
+    return pd.DataFrame(rows)
+
+
+def cost_bridge(reference: dict, redesigned: dict, reference_label: str) -> go.Figure:
+    components=list(reference["cost_breakdown_cr"])
+    changes=[redesigned["cost_breakdown_cr"][key]-reference["cost_breakdown_cr"][key]
+             for key in components]
+    fig=go.Figure(go.Waterfall(
+        x=[reference_label,*components,"Redesign"],
+        measure=["absolute",*["relative"]*len(components),"total"],
+        y=[reference["objective_cr"],*changes,0],
+        text=[f"₹{reference['objective_cr']:,.1f}",*[f"{v:+,.1f}" for v in changes],
+              f"₹{redesigned['objective_cr']:,.1f}"],
+        textposition="outside",
+        connector={"line":{"color":"#abc4c6"}},
+        increasing={"marker":{"color":"#b4644f"}},
+        decreasing={"marker":{"color":"#08736e"}},
+        totals={"marker":{"color":"#183b4d"}},
+        hovertemplate="%{x}<br>₹%{y:,.2f} cr<extra></extra>"))
+    fig.update_layout(height=440,margin=dict(l=20,r=20,t=25,b=40),
+                      yaxis_title="Annual relevant cost (₹ crore)",
+                      paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
+                      font={"family":"Arial","color":"#183344"},
+                      xaxis={"tickangle":-20})
+    return fig
+
+
+def mode_facilities(base: dict, outcomes: dict[str, dict]) -> pd.DataFrame:
+    rows=[]
+    for site in I+G:
+        field="integrated_modules" if site in I else "split_modules"
+        rows.append({"Site":site,"Type":"Integrated" if site in I else "Split grinder",
+                     "Original Base":base[field][site],
+                     **{label:(result[field][site] if result["objective_cr"] is not None else "—")
+                        for label,result in outcomes.items()}})
     return pd.DataFrame(rows)
 
 
@@ -177,7 +236,7 @@ def build_form() -> None:
                                  for s in DATA["integrated_sites"]])
             edited_i = st.data_editor(i_df, hide_index=True, width="stretch",
                 disabled=["Site", "Location"], num_rows="fixed", key=f"integrated_{tag}",
-                column_config={"Module": st.column_config.SelectboxColumn("Module", options=["Optimize","Closed",*MODULES], required=True),
+                column_config={"Module": st.column_config.SelectboxColumn("Module", options=["Optimize","Open","Closed",*MODULES], required=True),
                                "Limestone ₹/t": st.column_config.NumberColumn("Limestone ₹/t",min_value=0.0,max_value=1000.0,step=5.0,required=True,
                                   help="Site-specific raw limestone cost. The source case does not specify a limestone freight lane.")})
             g_df = pd.DataFrame([{"Site": s["id"], "Location": s["name"],
@@ -185,8 +244,8 @@ def build_form() -> None:
                                  for s in DATA["split_sites"]])
             edited_g = st.data_editor(g_df, hide_index=True, width="stretch",
                 disabled=["Site", "Location"], num_rows="fixed", key=f"split_{tag}",
-                column_config={"Module": st.column_config.SelectboxColumn("Module", options=["Optimize","Closed",*MODULES], required=True)})
-            st.caption("Optimize lets the solver select a size or close the site. Selecting S/M/L requires that module; Closed forbids it.")
+                column_config={"Module": st.column_config.SelectboxColumn("Module", options=["Optimize","Open","Closed",*MODULES], required=True)})
+            st.caption("Optimize allows a size or closure; Open requires a site but lets the solver choose S/M/L. Selecting S/M/L fixes that module; Closed forbids it.")
             st.caption("Limestone is a site-specific input cost (₹/t), not a separate freight rate in the supplied case.")
         with st.expander("Freight, material and capital", expanded=True):
             cement_rate = st.number_input("Cement freight (₹/t-km)",0.01,20.0,float(p["cement_rate"]),0.05)
@@ -245,12 +304,76 @@ st.markdown('<div class="eyebrow">PRESCRIPTIVE ANALYTICS  ·  FY2030</div>',unsa
 st.title("The Rookie | Cement Network Lab")
 st.markdown('<p class="intro">Choose facilities, prices, material efficiency and regional demand. The MILP reoptimizes clinker and cement flows, explains the new footprint, and tests whether the original Base modules still work.</p>',unsafe_allow_html=True)
 
-view,compare,sensitivity,network,method=st.tabs(["Executive view","Scenario comparison","Sensitivity lab","Network explorer","Model & interview notes"])
+view,modes,compare,sensitivity,network,method=st.tabs(["Executive view","Decision modes","Scenario comparison","Sensitivity lab","Network explorer","Model & interview notes"])
 with view:
     st.subheader(f"Current decision: {active['name']}")
     render_solution(active,baseline)
     st.download_button("Download scenario settings (JSON)",st.session_state.active_json,
                        file_name="rookie_scenario.json",mime="application/json")
+with modes:
+    scenario=json.loads(st.session_state.active_json)
+    st.subheader(f"Keep, resize or redesign? · {scenario['name']}")
+    st.write("Each mode uses the same demand, material rates, freight rates, route rules and capacity ceiling. Only the facility choices change.")
+    labels=["1 · Reroute Base modules","2 · Resize Base locations","3 · Redesign"]
+    mode_results={
+        labels[0]:solve_config(fixed_base_config(scenario,baseline)),
+        labels[1]:solve_config(resize_base_config(scenario,baseline)),
+        labels[2]:active,
+    }
+    st.caption("1 keeps each Base module size and reroutes flows. 2 keeps Base sites open/closed but may choose new sizes. 3 uses the scenario builder's site choices and may open or close sites. Scenario closures apply to every mode.")
+    mode_table=mode_comparison_rows(mode_results)
+    st.dataframe(mode_table,hide_index=True,width="stretch",
+                 column_config={"Annual cost ₹ cr":st.column_config.NumberColumn(format="₹%.2f"),
+                                "Cement lead km":st.column_config.NumberColumn(format="%.1f"),
+                                "Split grinding %":st.column_config.NumberColumn(format="%.1f%%")})
+    fixed_res,resize_res,redesign=mode_results.values()
+    reference=next(((label,result) for label,result in list(mode_results.items())[:2]
+                    if result["objective_cr"] is not None),None)
+    if reference and redesign["objective_cr"] is not None:
+        ref_label,ref=reference
+        difference=ref["objective_cr"]-redesign["objective_cr"]
+        if abs(difference)<.005:
+            st.info(f"The redesign and {ref_label.lower()} have essentially the same annual cost under these inputs.")
+        elif difference>0:
+            st.success(f"Redesign reduces annual relevant cost by {money(difference,2)} versus {ref_label.lower()} under identical scenario inputs.")
+        else:
+            st.warning(f"Redesign costs {money(-difference,2)} more than {ref_label.lower()}. Check whether custom site/module mandates restrict the redesign.")
+        st.subheader("Where the cost changes")
+        st.plotly_chart(cost_bridge(ref,redesign,ref_label),width="stretch",key="mode_bridge")
+        components=list(ref["cost_breakdown_cr"])
+        bridge_table=pd.DataFrame([{"Cost component":key,
+                                    f"{ref_label} ₹ cr":ref["cost_breakdown_cr"][key],
+                                    "Redesign ₹ cr":redesign["cost_breakdown_cr"][key],
+                                    "Change ₹ cr":redesign["cost_breakdown_cr"][key]-ref["cost_breakdown_cr"][key]}
+                                   for key in components])
+        st.dataframe(bridge_table,hide_index=True,width="stretch",
+                     column_config={key:st.column_config.NumberColumn(format="₹%.2f")
+                                    for key in bridge_table.columns if "₹ cr" in key})
+        if resize_res["objective_cr"] is not None:
+            location_value=resize_res["objective_cr"]-redesign["objective_cr"]
+            if abs(location_value)<.005:
+                st.info("Resizing at the original Base locations reaches the same modeled annual cost as full redesign. New sites add no cost advantage under these inputs.")
+            elif location_value>0:
+                st.info(f"Changing the site footprint saves another {money(location_value,2)} beyond resizing at Base locations.")
+    elif redesign["objective_cr"] is not None:
+        st.warning("The Base footprint cannot serve this scenario even after resizing. Redesign is feasible; there is no numeric saving against an infeasible plan.")
+        newly_open=[site for site in I+G
+                    if baseline["integrated_modules" if site in I else "split_modules"][site]=="Closed"
+                    and redesign["integrated_modules" if site in I else "split_modules"][site]!="Closed"]
+        if newly_open:
+            st.info("The redesign opens " + ", ".join(newly_open) + " to restore a feasible network.")
+    else:
+        st.error("The chosen full redesign is infeasible under these settings. Review the site mandates, route limits and capacity.")
+    for label,result in list(mode_results.items())[:2]:
+        if result["objective_cr"] is None:
+            for note in result.get("diagnostics",[]):
+                st.caption(f"{label}: {note}")
+    st.subheader("Facility decisions by mode")
+    facility_table=mode_facilities(baseline,mode_results)
+    st.dataframe(facility_table,hide_index=True,width="stretch")
+    st.caption("A mode comparison is a like-for-like network comparison because demand, prices and route rules are held fixed. The annual cost figures include annualized capex and fixed opex; they are not a one-time cash investment appraisal.")
+    st.download_button("Download decision modes (CSV)",mode_table.to_csv(index=False).encode("utf-8-sig"),
+                       file_name="rookie_decision_modes.csv",mime="text/csv")
 with compare:
     st.subheader("Compare alternative futures")
     selection=st.multiselect("Preset scenarios",list(PRESET_LABELS),
@@ -403,12 +526,12 @@ with method:
     st.write("A mixed-integer linear program chooses one module or closure at each site, then routes clinker and finished cement to meet all market demand at the lowest annual relevant cost.")
     st.markdown("**Decision variables:** binary site/module choices; nonnegative clinker flows (I → G), direct cement flows (I → M) and split cement flows (G → M).")
     st.markdown("**Objective:** annualized capex + fixed opex + site-specific limestone + finished-cement freight + clinker freight.")
-    st.markdown("**Constraints:** every market is served; 0.66 t clinker per tonne of cement by default; clinker and grinding stay within 90% of selected nameplate; one module at most per site; normal route caps are 800 km cement and 1,300 km clinker.")
+    st.markdown("**Constraints:** every market is served; 0.66 t clinker per tonne of cement by default; clinker and grinding stay within 90% of selected nameplate; one module at most per site (exactly one when Open is required); normal route caps are 800 km cement and 1,300 km clinker.")
     st.info("The app is prescriptive optimization, not a machine-learning forecast. Its explanations are computed from exact model outputs and do not call a language model.")
     with st.expander("Model checks and interpretation"):
         st.write("Each solve reconciles the objective to its four cost components, checks all 12 market balances and validates selected-site capacity. The solver seeks an integer optimality gap of 0.01% or less. A time-limited incumbent is clearly labeled.")
         st.write("The case omits common conversion costs, taxes, working capital, implementation timing and uncertainty probabilities. Its market locations and distances are planning centroids rather than live logistics routes. Scenario differences are comparisons under changed inputs, not causal savings from a facility switch.")
     with st.expander("How to describe this project in an interview"):
-        st.write("I translated a manufacturing network case into a MILP, exposed key assumptions in a web app, and validated the optimized Base and required scenarios against the Excel model. Users can stress-test closures, tariffs, material intensity, capacities and regional demand, then see cost, feasibility, flows and robustness of the original design.")
+        st.write("I translated a manufacturing network case into a MILP, exposed key assumptions in a web app, and validated the optimized Base and required scenarios against the Excel model. Users can test rerouting, resizing and full redesign under identical conditions, then stress-test closures, freight, material intensity, capacity and regional demand.")
         st.write("The decision insight: the Base network is lowest cost under stated assumptions, but an I1 project delay makes its fixed installed capacity infeasible. The app identifies a reoptimized fallback instead of treating a single optimum as robust by default.")
     st.caption("Source: The Rookie FY2030 teaching-case workbook supplied for this assignment. No external market data is used.")
