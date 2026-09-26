@@ -36,8 +36,15 @@ st.markdown("""
     [data-testid="stMetricLabel"], [data-testid="stMetricLabel"] * {
         color: #45606b !important;
     }
-    [data-testid="stSidebar"] {background-color: #edf5f3 !important;
-        border-right: 1px solid #dce8e8;}
+    [data-testid="stSidebar"] {background-color: #183344 !important;
+        color: #f6fafb !important; border-right: 1px solid #315767;}
+    [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3, [data-testid="stSidebar"] h4,
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] label,
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p,
+    [data-testid="stSidebar"] > div > div > div > p {
+        color: #f6fafb !important;
+    }
     button[data-baseweb="tab"] {color: #183344 !important;}
     button[data-baseweb="tab"][aria-selected="true"] {color: #08736e !important;}
     .eyebrow {font-size: .78rem; font-weight: 700; letter-spacing: .14em;
