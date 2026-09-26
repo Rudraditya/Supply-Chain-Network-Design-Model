@@ -1,0 +1,408 @@
+{
+  "provenance": {
+    "case": "The Rookie — India Cement Network Design, FY2030",
+    "source_sheets": [
+      "2030 Demand",
+      "Candidate Facilities",
+      "Planning Distances",
+      "Scenarios & Deliverables"
+    ],
+    "note": "Teaching-case inputs. Market centres and distances are planning centroids, not live routes."
+  },
+  "markets": [
+    {
+      "id": "M1",
+      "cluster": "Delhi NCR / Upper North",
+      "region": "North",
+      "centre": "Delhi NCR",
+      "base_demand_mt": 3.995,
+      "scenario_a_demand_mt": 3.993
+    },
+    {
+      "id": "M2",
+      "cluster": "Rajasthan",
+      "region": "North",
+      "centre": "Jaipur",
+      "base_demand_mt": 1.9,
+      "scenario_a_demand_mt": 1.899
+    },
+    {
+      "id": "M3",
+      "cluster": "Uttar Pradesh",
+      "region": "Central",
+      "centre": "Lucknow",
+      "base_demand_mt": 3.4,
+      "scenario_a_demand_mt": 3.731
+    },
+    {
+      "id": "M4",
+      "cluster": "Madhya Pradesh",
+      "region": "Central",
+      "centre": "Bhopal",
+      "base_demand_mt": 1.745,
+      "scenario_a_demand_mt": 1.915
+    },
+    {
+      "id": "M5",
+      "cluster": "Gujarat",
+      "region": "West",
+      "centre": "Ahmedabad",
+      "base_demand_mt": 1.86,
+      "scenario_a_demand_mt": 1.64
+    },
+    {
+      "id": "M6",
+      "cluster": "Maharashtra & Goa",
+      "region": "West",
+      "centre": "Pune",
+      "base_demand_mt": 3.9,
+      "scenario_a_demand_mt": 3.439
+    },
+    {
+      "id": "M7",
+      "cluster": "Bihar & Jharkhand",
+      "region": "East",
+      "centre": "Patna",
+      "base_demand_mt": 2.8,
+      "scenario_a_demand_mt": 3.155
+    },
+    {
+      "id": "M8",
+      "cluster": "West Bengal & North-East",
+      "region": "East/NE",
+      "centre": "Kolkata",
+      "base_demand_mt": 3.05,
+      "scenario_a_demand_mt": 3.437
+    },
+    {
+      "id": "M9",
+      "cluster": "Odisha & Chhattisgarh",
+      "region": "East",
+      "centre": "Bhubaneswar",
+      "base_demand_mt": 3.085,
+      "scenario_a_demand_mt": 3.476
+    },
+    {
+      "id": "M10",
+      "cluster": "Andhra Pradesh & Telangana",
+      "region": "South",
+      "centre": "Hyderabad",
+      "base_demand_mt": 3.1,
+      "scenario_a_demand_mt": 2.734
+    },
+    {
+      "id": "M11",
+      "cluster": "Karnataka & Kerala",
+      "region": "South",
+      "centre": "Bengaluru",
+      "base_demand_mt": 2.5,
+      "scenario_a_demand_mt": 2.205
+    },
+    {
+      "id": "M12",
+      "cluster": "Tamil Nadu",
+      "region": "South",
+      "centre": "Chennai",
+      "base_demand_mt": 2.445,
+      "scenario_a_demand_mt": 2.156
+    }
+  ],
+  "integrated_sites": [
+    {
+      "id": "I1",
+      "name": "Chittorgarh–Nimbahera belt",
+      "state": "Rajasthan",
+      "limestone_inr_per_t": 205.0
+    },
+    {
+      "id": "I2",
+      "name": "Kachchh / Bhuj belt",
+      "state": "Gujarat",
+      "limestone_inr_per_t": 225.0
+    },
+    {
+      "id": "I3",
+      "name": "Satna–Rewa belt",
+      "state": "Madhya Pradesh",
+      "limestone_inr_per_t": 195.0
+    },
+    {
+      "id": "I4",
+      "name": "Baloda Bazar–Raipur belt",
+      "state": "Chhattisgarh",
+      "limestone_inr_per_t": 200.0
+    },
+    {
+      "id": "I5",
+      "name": "Kurnool–Kadapa belt",
+      "state": "Andhra Pradesh",
+      "limestone_inr_per_t": 210.0
+    },
+    {
+      "id": "I6",
+      "name": "Kalaburagi–Wadi belt",
+      "state": "Karnataka",
+      "limestone_inr_per_t": 215.0
+    }
+  ],
+  "split_sites": [
+    {
+      "id": "G1",
+      "name": "Dadri / Greater Noida",
+      "region": "NCR"
+    },
+    {
+      "id": "G2",
+      "name": "Pune",
+      "region": "Maharashtra"
+    },
+    {
+      "id": "G3",
+      "name": "Sankrail / Kolkata",
+      "region": "West Bengal"
+    },
+    {
+      "id": "G4",
+      "name": "Chennai",
+      "region": "Tamil Nadu"
+    }
+  ],
+  "integrated_modules": [
+    {
+      "id": "S",
+      "clinker_mtpa": 3.0,
+      "grinding_mtpa": 2.5,
+      "capex_cr": 2500.0,
+      "fixed_opex_cr_yr": 90.0
+    },
+    {
+      "id": "M",
+      "clinker_mtpa": 4.5,
+      "grinding_mtpa": 3.5,
+      "capex_cr": 3300.0,
+      "fixed_opex_cr_yr": 120.0
+    },
+    {
+      "id": "L",
+      "clinker_mtpa": 6.0,
+      "grinding_mtpa": 5.0,
+      "capex_cr": 4200.0,
+      "fixed_opex_cr_yr": 155.0
+    }
+  ],
+  "split_modules": [
+    {
+      "id": "S",
+      "grinding_mtpa": 2.5,
+      "capex_cr": 700.0,
+      "fixed_opex_cr_yr": 28.0
+    },
+    {
+      "id": "M",
+      "grinding_mtpa": 4.0,
+      "capex_cr": 1000.0,
+      "fixed_opex_cr_yr": 38.0
+    },
+    {
+      "id": "L",
+      "grinding_mtpa": 6.0,
+      "capex_cr": 1500.0,
+      "fixed_opex_cr_yr": 55.0
+    }
+  ],
+  "distances_km": {
+    "integrated_to_market": [
+      [
+        580.0,
+        300.0,
+        800.0,
+        400.0,
+        350.0,
+        860.0,
+        1270.0,
+        1700.0,
+        1510.0,
+        1110.0,
+        1630.0,
+        1730.0
+      ],
+      [
+        1150.0,
+        890.0,
+        1440.0,
+        950.0,
+        360.0,
+        820.0,
+        1900.0,
+        2300.0,
+        2040.0,
+        1350.0,
+        1700.0,
+        1910.0
+      ],
+      [
+        690.0,
+        680.0,
+        300.0,
+        450.0,
+        1030.0,
+        1180.0,
+        540.0,
+        960.0,
+        840.0,
+        1000.0,
+        1600.0,
+        1540.0
+      ],
+      [
+        1100.0,
+        1040.0,
+        710.0,
+        620.0,
+        1200.0,
+        1120.0,
+        640.0,
+        780.0,
+        490.0,
+        730.0,
+        1300.0,
+        1170.0
+      ],
+      [
+        1710.0,
+        1500.0,
+        1510.0,
+        1000.0,
+        1180.0,
+        640.0,
+        1570.0,
+        1580.0,
+        1150.0,
+        220.0,
+        390.0,
+        470.0
+      ],
+      [
+        1510.0,
+        1280.0,
+        1370.0,
+        800.0,
+        930.0,
+        410.0,
+        1510.0,
+        1600.0,
+        1200.0,
+        210.0,
+        590.0,
+        720.0
+      ]
+    ],
+    "split_to_market": [
+      [
+        40.0,
+        300.0,
+        460.0,
+        710.0,
+        950.0,
+        1410.0,
+        980.0,
+        1520.0,
+        1490.0,
+        1490.0,
+        2080.0,
+        2090.0
+      ],
+      [
+        1410.0,
+        1140.0,
+        1410.0,
+        770.0,
+        620.0,
+        0.0,
+        1680.0,
+        1890.0,
+        1520.0,
+        610.0,
+        880.0,
+        1100.0
+      ],
+      [
+        1550.0,
+        1610.0,
+        1050.0,
+        1330.0,
+        1930.0,
+        1870.0,
+        550.0,
+        20.0,
+        430.0,
+        1400.0,
+        1860.0,
+        1620.0
+      ],
+      [
+        2110.0,
+        1930.0,
+        1840.0,
+        1410.0,
+        1650.0,
+        1100.0,
+        1780.0,
+        1630.0,
+        1200.0,
+        620.0,
+        350.0,
+        0.0
+      ]
+    ],
+    "integrated_to_split": [
+      [
+        580.0,
+        820.0,
+        1620.0,
+        1660.0
+      ],
+      [
+        1130.0,
+        780.0,
+        2190.0,
+        1830.0
+      ],
+      [
+        630.0,
+        1130.0,
+        900.0,
+        1470.0
+      ],
+      [
+        1030.0,
+        1070.0,
+        730.0,
+        1120.0
+      ],
+      [
+        1630.0,
+        620.0,
+        1500.0,
+        450.0
+      ],
+      [
+        1440.0,
+        390.0,
+        1520.0,
+        690.0
+      ]
+    ]
+  },
+  "defaults": {
+    "hurdle_rate": 0.11,
+    "asset_life_years": 20,
+    "max_utilization": 0.9,
+    "clinker_factor": 0.66,
+    "limestone_t_per_t_clinker": 1.5,
+    "cement_freight_inr_per_tkm": 3.03,
+    "clinker_freight_inr_per_tkm": 1.6,
+    "cement_lane_max_km": 800,
+    "clinker_lane_max_km": 1300
+  }
+}
