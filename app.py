@@ -266,8 +266,12 @@ def cost_bridge(reference: dict, redesigned: dict, reference_label: str) -> go.F
     components=list(reference["cost_breakdown_cr"])
     changes=[redesigned["cost_breakdown_cr"][key]-reference["cost_breakdown_cr"][key]
              for key in components]
+    display={"Annualized capex + fixed opex":"Capex + fixed<br>opex",
+             "Limestone":"Limestone","Cement freight":"Cement<br>freight",
+             "Clinker freight":"Clinker<br>freight"}
+    first="Reroute Base<br>modules" if "Reroute" in reference_label else "Resize Base<br>locations"
     fig=go.Figure(go.Waterfall(
-        x=[reference_label,*components,"Redesign"],
+        x=[first,*[display.get(key,key) for key in components],"Redesign"],
         measure=["absolute",*["relative"]*len(components),"total"],
         y=[reference["objective_cr"],*changes,0],
         text=[f"₹{reference['objective_cr']:,.1f}",*[f"{v:+,.1f}" for v in changes],
@@ -278,11 +282,12 @@ def cost_bridge(reference: dict, redesigned: dict, reference_label: str) -> go.F
         decreasing={"marker":{"color":"#08736e"}},
         totals={"marker":{"color":"#183b4d"}},
         hovertemplate="%{x}<br>₹%{y:,.2f} cr<extra></extra>"))
-    fig.update_layout(height=440,margin=dict(l=20,r=20,t=25,b=40),
-                      yaxis_title="Annual relevant cost (₹ crore)",
+    fig.update_layout(height=470,margin=dict(l=105,r=30,t=45,b=90),
+                      yaxis={"title":{"text":"Annual relevant cost (₹ crore)","standoff":18},
+                             "tickformat":",.0f","automargin":True},
                       paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)",
                       font={"family":"Arial","color":"#183344"},
-                      xaxis={"tickangle":-20})
+                      xaxis={"tickangle":0,"automargin":True})
     return fig
 
 
@@ -400,7 +405,7 @@ def render_decision_studio() -> None:
         ["Sites on/off", "Market demand", "Rated capacity", "Freight & costs", "Route rules", "Review & run"])
 
     with facilities:
-        st.caption("On + Optimize: the solver may open or close the site. On + Open: it must open and the solver chooses S/M/L. On + S/M/L: that size is required. Off: forced closed.")
+        st.caption("ON makes a site available. ON + Optimize lets the solver decide whether to use it. ON + Open requires it to open. ON + S/M/L requires that size. OFF forces closure.")
         choices_i, choices_g = {}, {}
         for heading, sites, source, target, prefix in (
             ("Integrated plants", DATA["integrated_sites"], p["integrated_choices"], choices_i, "i"),
@@ -410,9 +415,13 @@ def render_decision_studio() -> None:
                 sid = site["id"]
                 label_col, toggle_col, module_col = st.columns([2.5, 1.1, 2.0], vertical_alignment="center")
                 label_col.markdown(f"**{sid}** · {site['name']}")
-                on = toggle_col.toggle("On / off", value=source[sid] != "Closed",
-                                       key=f"site_{prefix}_{sid}_{tag}", label_visibility="collapsed",
-                                       help=f"{sid}: turn off to force closure")
+                state_key=f"site_{prefix}_{sid}_{tag}"
+                st.session_state.setdefault(state_key,source[sid] != "Closed")
+                on=bool(st.session_state[state_key])
+                if toggle_col.button("● ON" if on else "○ OFF",key=f"site_button_{prefix}_{sid}_{tag}",
+                                     type="primary" if on else "secondary",width="stretch"):
+                    st.session_state[state_key]=not on
+                    st.rerun()
                 initial = source[sid] if source[sid] != "Closed" else "Optimize"
                 choice = module_col.selectbox(f"{sid} module", ["Optimize", "Open", *MODULES],
                                               index=["Optimize", "Open", *MODULES].index(initial),
@@ -500,11 +509,11 @@ def render_decision_studio() -> None:
         m1,m2 = st.columns(2)
         with m1:
             clinker_factor = st.number_input("Clinker per tonne of cement", .40, 1.20,
-                float(p["clinker_factor"]), .01, key=f"factor_{tag}",
-                help="Default 0.66 t clinker / t cement. A lower value reduces clinker needed for every tonne of cement.")
+                float(p["clinker_factor"]), .01, key=f"factor_{tag}")
         with m2:
             limestone_requirement = st.number_input("Limestone per tonne of clinker", .80, 2.50,
                 float(p["limestone_requirement"]), .05, key=f"requirement_{tag}")
+        st.caption("The case starts at 0.66 t clinker per tonne of cement. A lower clinker factor reduces clinker needed per tonne of cement.")
         st.markdown("**Module investment and fixed operations**")
         with st.popover("ⓘ What do capex and opex multipliers mean?"):
             st.write("1.00 uses the case costs; 1.20 raises that category's costs by 20%; 0.80 reduces them by 20%. Capex is charged through an annualized capital recovery factor (11% hurdle rate, 20-year asset life). Fixed opex is an annual site cost.")
@@ -517,10 +526,10 @@ def render_decision_studio() -> None:
         c1,c2 = st.columns(2)
         with c1:
             capex = st.number_input("Capex multiplier", .10, 3.0, float(p["capex_multiplier"]), .05,
-                key=f"capex_{tag}", help="Multiplies each selected module's original investment before annualization. 1.00 = case amount.")
+                key=f"capex_{tag}")
         with c2:
             opex = st.number_input("Fixed opex multiplier", .10, 3.0, float(p["opex_multiplier"]), .05,
-                key=f"opex_{tag}", help="Multiplies each selected module's annual fixed operating cost. 1.00 = case amount.")
+                key=f"opex_{tag}")
 
     with rules:
         util = st.number_input("Maximum planned utilization (0.90 = 90%)", .50, 1.00,
@@ -537,7 +546,8 @@ def render_decision_studio() -> None:
     with review:
         st.subheader("Review, name and run the complete scenario")
         st.write("The lock applies to all five decision sections together. It does not solve or save anything. After locking, use Save and Optimize as separate actions.")
-        name = st.text_input("Name this scenario", value=f"Custom from {starting}", key=f"scenario_name_{tag}", help="This exact name will appear in Saved scenarios and Scenario comparison after you save.")
+        name = st.text_input("Name this scenario", value=f"Custom from {starting}", key=f"scenario_name_{tag}")
+        st.caption("This name will appear in Saved scenarios and Scenario comparison after you save.")
         cfg=copy.deepcopy(p)
         safe_name=name.strip() or "Custom"
         if safe_name in PRESET_LABELS:
@@ -560,7 +570,6 @@ def render_decision_studio() -> None:
                 st.error(str(exc))
             else:
                 st.session_state.locked_json=draft_json
-                st.session_state.last_lock=f"Locked: {safe_name}"
                 st.rerun()
         locked_json=st.session_state.get("locked_json")
         locked=locked_json==draft_json
@@ -576,7 +585,7 @@ def render_decision_studio() -> None:
                     st.session_state.saved_custom[safe_name]=copy.deepcopy(cfg)
                     st.session_state.compare_custom=list(dict.fromkeys(
                         [*st.session_state.get("compare_custom",[]),safe_name]))
-                    st.session_state.last_save=f"Saved {safe_name}. It is selected in Scenario comparison."
+                    st.session_state.flash_message=f"Saved {safe_name}. It is selected in Scenario comparison."
                     st.rerun()
             if run:
                 try:
@@ -586,16 +595,14 @@ def render_decision_studio() -> None:
                 else:
                     st.session_state.active_json=locked_json
                     st.session_state.active_result=candidate
-                    st.session_state.last_run=f"{safe_name}: {status_label(candidate)}"
+                    st.session_state.flash_message=f"{safe_name}: {status_label(candidate)}. See Executive view for the result."
                     st.rerun()
         elif locked_json:
             st.info("The draft changed after the previous lock. Review your inputs and press Lock decisions again before optimizing or saving.")
         else:
             st.info("The solver has not run on this draft. Finish editing, then lock decisions to enable Optimize and Save.")
-        if st.session_state.get("last_run"):
-            st.success(st.session_state.last_run + " · See Executive view for the result.")
-        if st.session_state.get("last_save"):
-            st.success(st.session_state.last_save)
+        if st.session_state.get("flash_message"):
+            st.success(st.session_state.pop("flash_message"))
         st.caption("Locking is a snapshot, not an optimization run. Any edit after locking invalidates the lock. Saved scenarios remain available during this browser session; export them from Saved scenarios for later use.")
 
 
@@ -779,8 +786,8 @@ with compare:
     st.session_state.compare_custom=[n for n in st.session_state.get("compare_custom",[]) if n in custom_names]
     extra=st.multiselect("Your saved custom scenarios",custom_names,key="compare_custom")
     st.caption("Lock and save a named scenario in Decision studio to add it here. Inspect or delete it in Saved scenarios.")
-    fixed=st.checkbox("Test fixed Base modules under each scenario",value=True,
-                      help="Keep Base module sizes; reoptimize legal flows. Any site made unavailable by a scenario is closed.")
+    fixed=st.checkbox("Test fixed Base modules under each scenario",value=True)
+    st.caption("This additional check keeps Base module sizes, reroutes legal flows, and honors any forced site closure.")
     if st.button("Run comparison",type="primary"):
         rows=[];results={}
         for label in selection+extra:
@@ -848,13 +855,12 @@ with sensitivity:
     range_col,upper_col,points_col=st.columns(3)
     with range_col:
         lower=st.number_input("From",min_value=float(low),max_value=float(high),
-            value=float(max(low,round(center*.8,2))),step=.01,help="Lowest value to test")
+            value=float(max(low,round(center*.8,2))),step=.01)
     with upper_col:
         upper=st.number_input("To",min_value=float(low),max_value=float(high),
-            value=float(min(high,round(center*1.2,2))),step=.01,help="Highest value to test")
+            value=float(min(high,round(center*1.2,2))),step=.01)
     with points_col:
-        points=st.selectbox("Number of solves",[5,7,9],index=1,
-            help="The number of fresh optimization runs at evenly spaced input values. More solves give a smoother curve and take longer.")
+        points=st.selectbox("Number of solves",[5,7,9],index=1)
     st.caption(f"Example: {points} solves test {points} values from {lower:g} to {upper:g}, including both endpoints. This is an analysis of one input, separate from the Decision studio's main Optimize button.")
     if lower>=upper:
         st.warning("Set 'To' above 'From' to run the sensitivity analysis.")
