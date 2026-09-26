@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from model import (PRESET_LABELS, MODULES, fixed_base_config, resize_base_config,
-                   load_case, preset, solve)
+                   load_case, preset, solve, validate_config)
 
 st.set_page_config(
     page_title="The Rookie | Cement Network Lab",
@@ -20,6 +20,13 @@ st.set_page_config(
 )
 st.markdown("""
 <style>
+    :root, [data-testid="stApp"] {
+        color-scheme: light !important;
+        --primary-color: #08736e !important;
+        --background-color: #f6fafb !important;
+        --secondary-background-color: #edf5f3 !important;
+        --text-color: #183344 !important;
+    }
     /* Keep the case readable even when the viewer has selected Streamlit's dark theme. */
     .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
         background-color: #f6fafb !important;
@@ -47,11 +54,22 @@ st.markdown("""
     }
     [data-testid="stMain"] [role="tab"], [data-testid="stMain"] [role="tab"] * {
         color: #355260 !important;
+        background-color: transparent !important;
+        box-shadow: none !important;
+        outline-color: #08736e !important;
     }
     [data-testid="stMain"] [role="tab"][aria-selected="true"],
     [data-testid="stMain"] [role="tab"][aria-selected="true"] * {
         color: #08736e !important; font-weight: 700 !important;
         border-bottom-color: #08736e !important;
+        border-left-color: transparent !important; border-right-color: transparent !important;
+    }
+    [data-testid="stMain"] [role="tab"][aria-selected="true"]::after,
+    [data-testid="stMain"] [role="tab"][aria-selected="true"]::before {
+        background-color: #08736e !important; border-color: #08736e !important;
+    }
+    [data-testid="stMain"] [role="tab"]:focus-visible {
+        outline: 2px solid #08736e !important; outline-offset: 2px !important;
     }
     [data-testid="stMain"] [role="tab"]:hover,
     [data-testid="stMain"] [role="tab"]:hover * {
@@ -61,29 +79,65 @@ st.markdown("""
         background-color: #08736e !important;
     }
     [data-testid="stMain"] [data-testid="stBaseButton-secondary"],
-    [data-testid="stMain"] [data-testid="stDownloadButton"] button {
+    [data-testid="stMain"] [data-testid="stDownloadButton"] button,
+    [data-testid="stMain"] button[kind="secondary"] {
         background-color: #ffffff !important; color: #183344 !important;
-        border: 1px solid #9ab8b6 !important;
+        border: 1px solid #9ab8b6 !important; box-shadow: none !important;
     }
     [data-testid="stMain"] [data-testid="stBaseButton-secondary"] *,
     [data-testid="stMain"] [data-testid="stDownloadButton"] button * {
         color: #183344 !important;
     }
-    [data-testid="stBaseButton-primary"] {
+    [data-testid="stBaseButton-primary"],
+    [data-testid="stMain"] button[kind="primary"] {
         background-color: #08736e !important; color: #ffffff !important;
+        border: 1px solid #08736e !important; box-shadow: none !important;
     }
-    [data-testid="stBaseButton-primary"] * {color: #ffffff !important;}
-    [data-testid="stMain"] [data-baseweb="select"] > div,
-    [data-testid="stMain"] [data-baseweb="input"] > div {
+    [data-testid="stBaseButton-primary"] *,
+    [data-testid="stMain"] button[kind="primary"] * {color: #ffffff !important;}
+    [data-testid="stMain"] [data-baseweb="select"],
+    [data-testid="stMain"] [data-baseweb="select"] div,
+    [data-testid="stMain"] [data-baseweb="input"],
+    [data-testid="stMain"] [data-baseweb="input"] div,
+    [data-testid="stMain"] [data-baseweb="base-input"],
+    [data-testid="stMain"] [data-baseweb="textarea"] {
         background: #ffffff !important; color: #183344 !important;
+        border-color: #9ab8b6 !important; color-scheme: light !important;
+    }
+    [data-testid="stMain"] [data-testid="stSelectbox"] div,
+    [data-testid="stMain"] [data-testid="stMultiSelect"] div,
+    [data-testid="stMain"] [data-testid="stTextInput"] div,
+    [data-testid="stMain"] [data-testid="stNumberInput"] div {
+        background-color: #ffffff !important; color: #183344 !important;
         border-color: #9ab8b6 !important;
     }
+    [data-testid="stMain"] [data-baseweb="select"]:focus-within,
+    [data-testid="stMain"] [data-baseweb="input"]:focus-within {
+        border-color: #08736e !important; box-shadow: 0 0 0 1px #08736e !important;
+    }
     [data-testid="stMain"] input,
-    [data-testid="stMain"] [data-baseweb="select"] * {
+    [data-testid="stMain"] textarea,
+    [data-testid="stMain"] [data-baseweb="select"] > div * {
         color: #183344 !important;
+    }
+    [data-testid="stMain"] [data-baseweb="tag"],
+    [data-testid="stMain"] [data-baseweb="tag"] * {
+        background-color: #08736e !important; color: #ffffff !important;
+        fill: #ffffff !important;
+    }
+    [data-baseweb="popover"], [data-baseweb="menu"],
+    [data-baseweb="popover"] *, [data-baseweb="menu"] * {
+        background-color: #ffffff !important; color: #183344 !important;
+    }
+    [data-testid="stMain"] input[type="checkbox"] {accent-color: #08736e !important;}
+    [data-testid="stMain"] [data-testid="stCheckbox"] [data-baseweb="checkbox"] * {
+        border-color: #08736e !important;
     }
     [data-testid="stMain"] [data-testid="stWidgetLabel"] *,
     [data-testid="stMain"] [data-testid="stCaptionContainer"] * {
+        color: #45606b !important;
+    }
+    [data-testid="stMain"] [data-testid="stCaptionContainer"] p {
         color: #45606b !important;
     }
     [data-testid="stMain"] [data-testid="stSlider"] [role="slider"] {
@@ -282,14 +336,13 @@ def render_solution(res: dict, baseline: dict) -> None:
 
 def render_decision_studio() -> None:
     st.subheader("Decision studio")
-    st.write("Start with a case scenario, change any assumption, then optimize. A switch turned off forces a site closed. Percent changes apply to the selected preset, not automatically to Base.")
+    st.write("1. Set any inputs across the sections. 2. Lock the completed decisions. 3. Optimize the locked scenario and save it under a name for comparison.")
     starting = st.selectbox("Start from a preset", list(PRESET_LABELS),
                             format_func=lambda x: f"{x} — {PRESET_LABELS[x]}", key="studio_preset")
     p = preset(starting, DATA)
     tag = list(PRESET_LABELS).index(starting)
     name = st.text_input("Scenario name", value=f"Custom from {starting}", key=f"scenario_name_{tag}")
-    st.caption("Customize any section below, then use Optimize here or at the bottom. Freight rates and cost multipliers are in Freight & costs.")
-    run_top = st.button("Optimize this decision", type="primary", width="stretch", key="run_custom_top")
+    st.caption("Freight rates and cost multipliers are in Freight & costs. A switch turned off forces a site closed. Percent changes apply to the selected preset.")
     facilities, markets, capacities, economics, rules = st.tabs(
         ["Sites on/off", "Market demand", "Rated capacity", "Freight & costs", "Route rules"])
 
@@ -417,8 +470,8 @@ def render_decision_studio() -> None:
                 key=f"opex_{tag}", help="Multiplies each selected module's annual fixed operating cost. 1.00 = case amount.")
 
     with rules:
-        util = st.slider("Maximum planned utilization", .50, 1.00, float(p["utilization"]), .01,
-                         key=f"util_{tag}")
+        util = st.number_input("Maximum planned utilization (0.90 = 90%)", .50, 1.00,
+            float(p["utilization"]), .01, key=f"util_{tag}")
         r1,r2 = st.columns(2)
         with r1:
             cem_limit = st.number_input("Max cement lane (km)", 100, 2500,
@@ -428,34 +481,132 @@ def render_decision_studio() -> None:
                                           int(p["clinker_limit_km"]), 50, key=f"klinklimit_{tag}")
         st.caption("A route beyond its lane limit is excluded from the optimization. All markets still must receive their full target demand.")
 
+    cfg=copy.deepcopy(p)
+    safe_name=name.strip() or "Custom"
+    if safe_name in PRESET_LABELS:
+        safe_name=f"Custom: {safe_name}"
+    cfg.update(name=safe_name, cement_rate=cement_rate, clinker_rate=clinker_rate,
+        clinker_factor=clinker_factor, limestone_requirement=limestone_requirement,
+        capex_multiplier=capex, opex_multiplier=opex, utilization=util,
+        cement_limit_km=cem_limit, clinker_limit_km=klink_limit, demand_mt=demands,
+        integrated_choices=choices_i, split_choices=choices_g, limestone_rates=lime_rates,
+        integrated_clinker_capacity_pct={sid:float(change[0]) for sid,change in integrated_cap.items()},
+        integrated_grinding_capacity_pct={sid:float(change[1]) for sid,change in integrated_cap.items()},
+        split_grinding_capacity_pct={sid:float(change) for sid,change in split_cap.items()})
+    draft_json=json.dumps(cfg,sort_keys=True)
     st.divider()
-    run_bottom = st.button("Optimize this decision", type="primary", width="stretch", key="run_custom_bottom")
-    if run_top or run_bottom:
-        cfg=copy.deepcopy(p)
-        safe_name=name.strip() or "Custom"
-        if safe_name in PRESET_LABELS:
-            safe_name=f"Custom: {safe_name}"
-        cfg.update(name=safe_name, cement_rate=cement_rate, clinker_rate=clinker_rate,
-            clinker_factor=clinker_factor, limestone_requirement=limestone_requirement,
-            capex_multiplier=capex, opex_multiplier=opex, utilization=util,
-            cement_limit_km=cem_limit, clinker_limit_km=klink_limit, demand_mt=demands,
-            integrated_choices=choices_i, split_choices=choices_g, limestone_rates=lime_rates,
-            integrated_clinker_capacity_pct={sid:float(change[0]) for sid,change in integrated_cap.items()},
-            integrated_grinding_capacity_pct={sid:float(change[1]) for sid,change in integrated_cap.items()},
-            split_grinding_capacity_pct={sid:float(change) for sid,change in split_cap.items()})
+    st.subheader("Finalize this scenario")
+    if st.button("1 · Lock decisions",type="primary",width="stretch",key="lock_decisions"):
         try:
-            candidate=solve_config(cfg)
-        except (ValueError, AssertionError) as exc:
+            validate_config(cfg,DATA)
+        except (ValueError, KeyError) as exc:
             st.error(str(exc))
         else:
-            st.session_state.active_json=json.dumps(cfg,sort_keys=True)
-            st.session_state.active_result=candidate
-            st.session_state.saved_custom[cfg["name"]]=cfg
-            st.session_state.last_run=f"{cfg['name']}: {status_label(candidate)}"
+            st.session_state.locked_json=draft_json
+            st.session_state.last_lock=f"Locked: {safe_name}"
             st.rerun()
+    locked_json=st.session_state.get("locked_json")
+    locked=locked_json==draft_json
+    if locked:
+        st.success(f"Decisions locked for {safe_name}. You can optimize and save this exact set of inputs below.")
+        run_col,save_col=st.columns(2)
+        run=run_col.button("2 · Optimize locked scenario",type="primary",width="stretch",key="run_locked")
+        save=save_col.button("Save named scenario",width="stretch",key="save_locked")
+        if save:
+            if safe_name in st.session_state.saved_custom and st.session_state.saved_custom[safe_name]!=cfg:
+                st.error("This name is already saved. Change the scenario name, lock again, then save.")
+            else:
+                st.session_state.saved_custom[safe_name]=copy.deepcopy(cfg)
+                st.session_state.compare_custom=list(dict.fromkeys(
+                    [*st.session_state.get("compare_custom",[]),safe_name]))
+                st.session_state.last_save=f"Saved {safe_name}. It is selected in Scenario comparison."
+                st.rerun()
+        if run:
+            try:
+                candidate=solve_config(json.loads(locked_json))
+            except (ValueError, AssertionError) as exc:
+                st.error(str(exc))
+            else:
+                st.session_state.active_json=locked_json
+                st.session_state.active_result=candidate
+                st.session_state.last_run=f"{safe_name}: {status_label(candidate)}"
+                st.rerun()
+    elif locked_json:
+        st.info("The draft changed after the previous lock. Review your inputs and press Lock decisions again before optimizing or saving.")
+    else:
+        st.info("The solver has not run on this draft. Finish editing, then lock decisions to enable Optimize and Save.")
     if st.session_state.get("last_run"):
         st.success(st.session_state.last_run + " · See Executive view for the result.")
-    st.caption("The last optimized result appears in Executive view, Decision modes and Network explorer. Your custom scenarios also appear in Scenario comparison.")
+    if st.session_state.get("last_save"):
+        st.success(st.session_state.last_save)
+    st.caption("Locking is a snapshot, not an optimization run. Any edit after locking invalidates the lock. Saved scenarios remain available during this browser session; export them from Saved scenarios for later use.")
+
+
+def render_scenario_library() -> None:
+    st.subheader("Scenario library")
+    st.write("Inspect the exact assumptions behind a preset or a named scenario. Save a draft in Decision studio after locking it; then select it in Scenario comparison.")
+    saved=st.session_state.saved_custom
+    options=[*PRESET_LABELS,*saved]
+    if st.session_state.get("scenario_detail_name") not in options:
+        st.session_state.scenario_detail_name="Base"
+    chosen=st.selectbox("Scenario to inspect",options,key="scenario_detail_name")
+    cfg=preset(chosen,DATA) if chosen in PRESET_LABELS else saved[chosen]
+    st.caption("Case preset" if chosen in PRESET_LABELS else "Your saved scenario")
+    st.metric("Demand",f"{sum(cfg['demand_mt']):.3f} Mt")
+    st.markdown("**Site decisions**")
+    light_table([{"Site":sid,"Location":site["name"],"Decision":cfg["integrated_choices"][sid]}
+        for site in DATA["integrated_sites"] for sid in [site["id"]]]+
+        [{"Site":sid,"Location":site["name"],"Decision":cfg["split_choices"][sid]}
+         for site in DATA["split_sites"] for sid in [site["id"]]])
+    st.markdown("**Demand by market**")
+    light_table([{"Market":m["id"],"Centre":m["centre"],"Demand Mt":round(cfg["demand_mt"][j],4)}
+        for j,m in enumerate(DATA["markets"])])
+    st.markdown("**Rates, efficiency and route limits**")
+    light_table([{"Input":key,"Value":value} for key,value in (
+        ("Cement freight ₹/t-km",cfg["cement_rate"]),
+        ("Clinker freight ₹/t-km",cfg["clinker_rate"]),
+        ("Clinker factor t/t cement",cfg["clinker_factor"]),
+        ("Limestone t/t clinker",cfg["limestone_requirement"]),
+        ("Capex multiplier",cfg["capex_multiplier"]),
+        ("Fixed opex multiplier",cfg["opex_multiplier"]),
+        ("Max utilization %",round(100*cfg["utilization"],1)),
+        ("Max cement lane km",cfg["cement_limit_km"]),
+        ("Max clinker lane km",cfg["clinker_limit_km"]))])
+    st.markdown("**Site limestone rates and nameplate changes**")
+    light_table([{"Site":sid,"Limestone ₹/t":cfg["limestone_rates"][sid],
+        "Clinker capacity %":cfg["integrated_clinker_capacity_pct"][sid],
+        "Grinding capacity %":cfg["integrated_grinding_capacity_pct"][sid]}
+        for sid in I]+[{"Site":sid,"Limestone ₹/t":"—","Clinker capacity %":"—",
+                         "Grinding capacity %":cfg["split_grinding_capacity_pct"][sid]} for sid in G])
+    if chosen in saved:
+        if st.button(f"Delete {chosen}",key="delete_saved"):
+            del saved[chosen]
+            st.session_state.compare_custom=[x for x in st.session_state.get("compare_custom",[]) if x!=chosen]
+            st.session_state.pop("comparison_rows",None)
+            st.session_state.pop("comparison_results",None)
+            st.rerun()
+    st.divider()
+    st.markdown("**Keep your named scenarios after this browser session**")
+    st.download_button("Export saved scenarios (JSON)",json.dumps(saved,indent=2,sort_keys=True),
+        file_name="rookie_saved_scenarios.json",mime="application/json")
+    incoming=st.file_uploader("Import a previously exported scenario file",type=["json"],key="scenario_import")
+    if incoming is not None and st.button("Import named scenarios"):
+        try:
+            payload=json.loads(incoming.getvalue().decode("utf-8"))
+            if not isinstance(payload,dict):
+                raise ValueError("Expected a JSON object of named scenarios.")
+            for scenario_name,settings in payload.items():
+                if scenario_name in PRESET_LABELS or not isinstance(settings,dict) or settings.get("name")!=scenario_name:
+                    raise ValueError(f"Invalid or reserved scenario name: {scenario_name}")
+                validate_config(settings,DATA)
+                if scenario_name in saved and saved[scenario_name]!=settings:
+                    raise ValueError(f"{scenario_name} already exists with different settings. Delete it before importing.")
+        except (ValueError,KeyError,TypeError,UnicodeDecodeError) as exc:
+            st.error(f"Import failed: {exc}")
+        else:
+            saved.update(payload)
+            st.success(f"Imported {len(payload)} named scenario(s).")
+            st.rerun()
 
 
 if "saved_custom" not in st.session_state:
@@ -468,10 +619,13 @@ if "active_result" not in st.session_state:
 baseline=solve_cached(BASE_JSON)
 active=st.session_state.active_result
 st.markdown('<div class="eyebrow">PRESCRIPTIVE ANALYTICS  ·  FY2030</div>',unsafe_allow_html=True)
-st.title("The Rookie | Cement Network Lab")
+title_col,help_col=st.columns([7,1],vertical_alignment="center")
+title_col.title("The Rookie | Cement Network Lab")
+with help_col:
+    method=st.popover("ⓘ Model guide",use_container_width=True)
 st.markdown('<p class="intro">Use the Decision studio to change facilities, capacity, prices, material efficiency and market demand. The MILP reoptimizes clinker and cement flows, explains the new footprint, and tests whether the original Base modules still work.</p>',unsafe_allow_html=True)
 
-view,studio,modes,compare,sensitivity,network,method=st.tabs(["Executive view","Decision studio","Decision modes","Scenario comparison","Sensitivity lab","Network explorer","Model & interview notes"])
+view,studio,library,modes,compare,sensitivity,network=st.tabs(["Executive view","Decision studio","Saved scenarios","Network choices","Scenario comparison","Sensitivity lab","Network explorer"])
 with view:
     st.subheader(f"Current decision: {active['name']}")
     render_solution(active,baseline)
@@ -479,9 +633,12 @@ with view:
                        file_name="rookie_scenario.json",mime="application/json")
 with studio:
     render_decision_studio()
+with library:
+    render_scenario_library()
 with modes:
     scenario=json.loads(st.session_state.active_json)
-    st.subheader(f"Keep, resize or redesign? · {scenario['name']}")
+    st.subheader(f"Compare network choices · {scenario['name']}")
+    st.write("This view compares three decisions: (1) keep Base facility sizes and reroute, (2) keep Base locations but resize modules, or (3) choose a new network. It evaluates all three under the same scenario inputs.")
     st.write("Each mode uses the same demand, material rates, freight rates, route rules and capacity ceiling. Only the facility choices change.")
     labels=["1 · Reroute Base modules","2 · Resize Base locations","3 · Redesign"]
     mode_results={
@@ -489,7 +646,7 @@ with modes:
         labels[1]:solve_config(resize_base_config(scenario,baseline)),
         labels[2]:active,
     }
-    st.caption("1 keeps each Base module size and reroutes flows. 2 keeps Base sites open/closed but may choose new sizes. 3 uses the Decision studio site choices and may open or close sites. Scenario closures apply to every mode.")
+    st.caption("Scenario closures apply to every choice. A required site/module in the Decision studio applies to full redesign; the first two choices hold the Base footprint as described above.")
     mode_table=mode_comparison_rows(mode_results)
     st.dataframe(mode_table,hide_index=True,width="stretch",
                  column_config={"Annual cost ₹ cr":st.column_config.NumberColumn(format="₹%.2f"),
@@ -549,7 +706,9 @@ with compare:
         default=["Base","A · Demand mix","B · Freight shock","C · I1 delay"],
         format_func=lambda k: f"{k} — {PRESET_LABELS[k]}")
     custom_names=list(st.session_state.saved_custom)
-    extra=st.multiselect("Your saved custom scenarios",custom_names)
+    st.session_state.compare_custom=[n for n in st.session_state.get("compare_custom",[]) if n in custom_names]
+    extra=st.multiselect("Your saved custom scenarios",custom_names,key="compare_custom")
+    st.caption("Lock and save a named scenario in Decision studio to add it here. Inspect or delete it in Saved scenarios.")
     fixed=st.checkbox("Test fixed Base modules under each scenario",value=True,
                       help="Keep Base module sizes; reoptimize legal flows. Any site made unavailable by a scenario is closed.")
     if st.button("Run comparison",type="primary"):
