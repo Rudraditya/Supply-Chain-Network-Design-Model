@@ -2,7 +2,7 @@
 import copy
 import unittest
 
-from model import base_config, fixed_base_config, load_case, preset, solve
+from model import base_config, fixed_base_config, resize_base_config, load_case, preset, solve
 
 
 class NetworkModelTests(unittest.TestCase):
@@ -41,6 +41,36 @@ class NetworkModelTests(unittest.TestCase):
         self.assertIsNone(c["objective_cr"])
         self.assertTrue(any("grinding" in note for note in c["diagnostics"]))
 
+    def test_three_modes_isolate_rerouting_resizing_and_reopening(self):
+        for name in ("A · Demand mix", "B · Freight shock", "E · G1 closure"):
+            with self.subTest(name=name):
+                scenario = preset(name, self.data)
+                reroute = solve(fixed_base_config(scenario, self.base), self.data)
+                resized = solve(resize_base_config(scenario, self.base), self.data)
+                redesigned = solve(scenario, self.data)
+                if reroute["objective_cr"] is not None:
+                    self.assertGreaterEqual(reroute["objective_cr"] + 1e-4, resized["objective_cr"])
+                self.assertGreaterEqual(resized["objective_cr"] + 1e-4, redesigned["objective_cr"])
+                self.assertEqual(resized["integrated_modules"]["I2"], "Closed")
+                if name == "E · G1 closure":
+                    self.assertEqual(resized["split_modules"]["G1"], "Closed")
+                else:
+                    self.assertNotEqual(resized["split_modules"]["G1"], "Closed")
+        c = preset("C · I1 delay", self.data)
+        fixed = solve(fixed_base_config(c, self.base), self.data)
+        resized = solve(resize_base_config(c, self.base), self.data)
+        redesigned = solve(c, self.data)
+        self.assertIsNone(fixed["objective_cr"])
+        self.assertIsNone(resized["objective_cr"])
+        self.assertEqual(redesigned["status"], "optimal")
+        self.assertNotEqual(redesigned["integrated_modules"]["I2"], "Closed")
+
+    def test_open_choice_requires_site_but_optimizes_module(self):
+        config = base_config(self.data)
+        config["integrated_choices"]["I2"] = "Open"
+        result = solve(config, self.data)
+        self.assertIn(result["integrated_modules"]["I2"], {"S", "M", "L"})
+
     def test_grinder_closure_and_material_factor(self):
         closed = preset("E · G1 closure", self.data)
         result = solve(closed, self.data)
@@ -63,6 +93,27 @@ class NetworkModelTests(unittest.TestCase):
         config = base_config(self.data)
         config["demand_mt"][0] = -1
         with self.assertRaisesRegex(ValueError, "nonnegative"):
+            solve(config, self.data)
+
+    def test_site_capacity_changes_are_enforced_and_reported(self):
+        config = base_config(self.data)
+        config["integrated_clinker_capacity_pct"]["I1"] = -10.0
+        config["integrated_grinding_capacity_pct"]["I1"] = 15.0
+        config["split_grinding_capacity_pct"]["G1"] = 20.0
+        for site, choice in (("I1", "L"), ("G1", "L")):
+            config["integrated_choices" if site.startswith("I") else "split_choices"][site] = choice
+        result = solve(config, self.data)
+        self.assertEqual(result["status"], "optimal")
+        usage = {(u["site"], u["process"]): u for u in result["site_utilization"]}
+        i_large = self.data["integrated_modules"][2]
+        g_large = self.data["split_modules"][2]
+        self.assertAlmostEqual(usage["I1", "Clinker"]["nameplate_mtpa"], .9*i_large["clinker_mtpa"])
+        self.assertAlmostEqual(usage["I1", "Grinding"]["nameplate_mtpa"], 1.15*i_large["grinding_mtpa"])
+        self.assertAlmostEqual(usage["G1", "Grinding"]["nameplate_mtpa"], 1.2*g_large["grinding_mtpa"])
+        self.assertTrue(all(u["utilization"] <= config["utilization"]+1e-5 for u in result["site_utilization"]))
+
+        config["split_grinding_capacity_pct"]["G1"] = -100
+        with self.assertRaisesRegex(ValueError, "Capacity change"):
             solve(config, self.data)
 
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import html
 import json
 from typing import Any
 
@@ -138,7 +139,39 @@ st.markdown("""
         color: #45606b !important;
     }
     [data-testid="stMain"] [data-testid="stCaptionContainer"] p {
-        color: #45606b !important;
+        color: #355260 !important;
+    }
+    [data-testid="stMain"] [data-testid="stAlert"] *,
+    [data-testid="stMain"] [data-testid="stMetricDelta"] * {
+        color: #183344 !important;
+    }
+    [data-testid="stMain"] [data-testid="stNumberInput"] button {
+        background: #dcefeb !important; color: #183344 !important;
+        border: 1px solid #9ab8b6 !important; opacity: 1 !important;
+        visibility: visible !important; box-shadow: none !important;
+    }
+    [data-testid="stMain"] [data-testid="stNumberInput"] button svg,
+    [data-testid="stMain"] [data-testid="stNumberInput"] button svg * {
+        color: #183344 !important; fill: #183344 !important;
+        stroke: #183344 !important; opacity: 1 !important;
+    }
+    [data-testid="stMain"] [data-testid="stNumberInput"] button:hover {
+        background: #08736e !important; color: #ffffff !important;
+    }
+    [data-testid="stMain"] [data-testid="stNumberInput"] button:hover svg,
+    [data-testid="stMain"] [data-testid="stNumberInput"] button:hover svg * {
+        color: #ffffff !important; fill: #ffffff !important; stroke: #ffffff !important;
+    }
+    [data-testid="stMain"] [data-baseweb="select"] svg,
+    [data-testid="stMain"] [data-baseweb="select"] svg *,
+    [data-baseweb="menu"] svg {
+        color: #183344 !important; fill: #183344 !important;
+        stroke: #183344 !important; opacity: 1 !important;
+    }
+    [data-testid="stMain"] [data-testid="stToggle"] [aria-checked="true"],
+    [data-testid="stMain"] [data-testid="stToggle"] input:checked + div,
+    [data-testid="stMain"] [data-testid="stToggle"] [role="switch"][aria-checked="true"] {
+        background-color: #08736e !important;
     }
     [data-testid="stMain"] [data-testid="stSlider"] [role="slider"] {
         background: #08736e !important; border-color: #08736e !important;
@@ -148,6 +181,8 @@ st.markdown("""
     .case-table th {text-align: left; background: #eaf3f1; color: #183344;
         font-weight: 700; padding: .65rem .8rem; border-bottom: 1px solid #c9dcda;}
     .case-table td {padding: .55rem .8rem; border-bottom: 1px solid #e0ebea;}
+    .case-table td.changed {background: #fff0f1; color: #a12632 !important;
+        font-weight: 750; border-left: 3px solid #c63745;}
     .eyebrow {font-size: .78rem; font-weight: 700; letter-spacing: .14em;
         color: #08736e; margin-bottom: .4rem;}
     .intro {font-size: 1.08rem; color: #526778; max-width: 900px;}
@@ -182,9 +217,28 @@ def km(v: float | None) -> str:
     return "N/A" if v is None else f"{v:,.0f} km"
 
 
-def light_table(rows: list[dict]) -> None:
-    st.markdown(pd.DataFrame(rows).to_html(index=False, classes="case-table", border=0),
-                unsafe_allow_html=True)
+def light_table(rows: list[dict], baseline_rows: list[dict] | None = None) -> None:
+    """Light HTML table, optionally marking changed values against aligned baseline rows."""
+    if not rows:
+        return
+    columns=list(rows[0])
+    output=['<table class="case-table"><thead><tr>']
+    output.extend(f'<th>{html.escape(str(col))}</th>' for col in columns)
+    output.append('</tr></thead><tbody>')
+    for j,row in enumerate(rows):
+        output.append('<tr>')
+        for col in columns:
+            value=row.get(col,"")
+            reference=baseline_rows[j].get(col,"") if baseline_rows else value
+            if isinstance(value,(int,float)) and isinstance(reference,(int,float)):
+                changed=abs(float(value)-float(reference))>1e-7
+            else:
+                changed=value!=reference
+            content="—" if value is None else html.escape(str(value))
+            output.append(f'<td class="{"changed" if changed else ""}">{content}</td>')
+        output.append('</tr>')
+    output.append('</tbody></table>')
+    st.markdown(''.join(output),unsafe_allow_html=True)
 
 
 def badge_rows(res: dict) -> pd.DataFrame:
@@ -341,10 +395,9 @@ def render_decision_studio() -> None:
                             format_func=lambda x: f"{x} — {PRESET_LABELS[x]}", key="studio_preset")
     p = preset(starting, DATA)
     tag = list(PRESET_LABELS).index(starting)
-    name = st.text_input("Scenario name", value=f"Custom from {starting}", key=f"scenario_name_{tag}")
-    st.caption("Freight rates and cost multipliers are in Freight & costs. A switch turned off forces a site closed. Percent changes apply to the selected preset.")
-    facilities, markets, capacities, economics, rules = st.tabs(
-        ["Sites on/off", "Market demand", "Rated capacity", "Freight & costs", "Route rules"])
+    st.caption("Freight rates and cost multipliers are in Freight & costs. A switch turned off forces a site closed. Percent changes apply to the selected preset. Finish in Review & run.")
+    facilities, markets, capacities, economics, rules, review = st.tabs(
+        ["Sites on/off", "Market demand", "Rated capacity", "Freight & costs", "Route rules", "Review & run"])
 
     with facilities:
         st.caption("On + Optimize: the solver may open or close the site. On + Open: it must open and the solver chooses S/M/L. On + S/M/L: that size is required. Off: forced closed.")
@@ -481,65 +534,69 @@ def render_decision_studio() -> None:
                                           int(p["clinker_limit_km"]), 50, key=f"klinklimit_{tag}")
         st.caption("A route beyond its lane limit is excluded from the optimization. All markets still must receive their full target demand.")
 
-    cfg=copy.deepcopy(p)
-    safe_name=name.strip() or "Custom"
-    if safe_name in PRESET_LABELS:
-        safe_name=f"Custom: {safe_name}"
-    cfg.update(name=safe_name, cement_rate=cement_rate, clinker_rate=clinker_rate,
-        clinker_factor=clinker_factor, limestone_requirement=limestone_requirement,
-        capex_multiplier=capex, opex_multiplier=opex, utilization=util,
-        cement_limit_km=cem_limit, clinker_limit_km=klink_limit, demand_mt=demands,
-        integrated_choices=choices_i, split_choices=choices_g, limestone_rates=lime_rates,
-        integrated_clinker_capacity_pct={sid:float(change[0]) for sid,change in integrated_cap.items()},
-        integrated_grinding_capacity_pct={sid:float(change[1]) for sid,change in integrated_cap.items()},
-        split_grinding_capacity_pct={sid:float(change) for sid,change in split_cap.items()})
-    draft_json=json.dumps(cfg,sort_keys=True)
-    st.divider()
-    st.subheader("Finalize this scenario")
-    if st.button("1 · Lock decisions",type="primary",width="stretch",key="lock_decisions"):
-        try:
-            validate_config(cfg,DATA)
-        except (ValueError, KeyError) as exc:
-            st.error(str(exc))
-        else:
-            st.session_state.locked_json=draft_json
-            st.session_state.last_lock=f"Locked: {safe_name}"
-            st.rerun()
-    locked_json=st.session_state.get("locked_json")
-    locked=locked_json==draft_json
-    if locked:
-        st.success(f"Decisions locked for {safe_name}. You can optimize and save this exact set of inputs below.")
-        run_col,save_col=st.columns(2)
-        run=run_col.button("2 · Optimize locked scenario",type="primary",width="stretch",key="run_locked")
-        save=save_col.button("Save named scenario",width="stretch",key="save_locked")
-        if save:
-            if safe_name in st.session_state.saved_custom and st.session_state.saved_custom[safe_name]!=cfg:
-                st.error("This name is already saved. Change the scenario name, lock again, then save.")
-            else:
-                st.session_state.saved_custom[safe_name]=copy.deepcopy(cfg)
-                st.session_state.compare_custom=list(dict.fromkeys(
-                    [*st.session_state.get("compare_custom",[]),safe_name]))
-                st.session_state.last_save=f"Saved {safe_name}. It is selected in Scenario comparison."
-                st.rerun()
-        if run:
+    with review:
+        st.subheader("Review, name and run the complete scenario")
+        st.write("The lock applies to all five decision sections together. It does not solve or save anything. After locking, use Save and Optimize as separate actions.")
+        name = st.text_input("Name this scenario", value=f"Custom from {starting}", key=f"scenario_name_{tag}", help="This exact name will appear in Saved scenarios and Scenario comparison after you save.")
+        cfg=copy.deepcopy(p)
+        safe_name=name.strip() or "Custom"
+        if safe_name in PRESET_LABELS:
+            safe_name=f"Custom: {safe_name}"
+        cfg.update(name=safe_name, origin_preset=starting, cement_rate=cement_rate, clinker_rate=clinker_rate,
+            clinker_factor=clinker_factor, limestone_requirement=limestone_requirement,
+            capex_multiplier=capex, opex_multiplier=opex, utilization=util,
+            cement_limit_km=cem_limit, clinker_limit_km=klink_limit, demand_mt=demands,
+            integrated_choices=choices_i, split_choices=choices_g, limestone_rates=lime_rates,
+            integrated_clinker_capacity_pct={sid:float(change[0]) for sid,change in integrated_cap.items()},
+            integrated_grinding_capacity_pct={sid:float(change[1]) for sid,change in integrated_cap.items()},
+            split_grinding_capacity_pct={sid:float(change) for sid,change in split_cap.items()})
+        draft_json=json.dumps(cfg,sort_keys=True)
+        st.divider()
+        st.subheader("Finalize this scenario")
+        if st.button("1 · Lock decisions",type="primary",width="stretch",key="lock_decisions"):
             try:
-                candidate=solve_config(json.loads(locked_json))
-            except (ValueError, AssertionError) as exc:
+                validate_config(cfg,DATA)
+            except (ValueError, KeyError) as exc:
                 st.error(str(exc))
             else:
-                st.session_state.active_json=locked_json
-                st.session_state.active_result=candidate
-                st.session_state.last_run=f"{safe_name}: {status_label(candidate)}"
+                st.session_state.locked_json=draft_json
+                st.session_state.last_lock=f"Locked: {safe_name}"
                 st.rerun()
-    elif locked_json:
-        st.info("The draft changed after the previous lock. Review your inputs and press Lock decisions again before optimizing or saving.")
-    else:
-        st.info("The solver has not run on this draft. Finish editing, then lock decisions to enable Optimize and Save.")
-    if st.session_state.get("last_run"):
-        st.success(st.session_state.last_run + " · See Executive view for the result.")
-    if st.session_state.get("last_save"):
-        st.success(st.session_state.last_save)
-    st.caption("Locking is a snapshot, not an optimization run. Any edit after locking invalidates the lock. Saved scenarios remain available during this browser session; export them from Saved scenarios for later use.")
+        locked_json=st.session_state.get("locked_json")
+        locked=locked_json==draft_json
+        if locked:
+            st.success(f"Decisions locked for {safe_name}. You can optimize and save this exact set of inputs below.")
+            run_col,save_col=st.columns(2)
+            run=run_col.button("2 · Optimize locked scenario",type="primary",width="stretch",key="run_locked")
+            save=save_col.button("Save named scenario",width="stretch",key="save_locked")
+            if save:
+                if safe_name in st.session_state.saved_custom and st.session_state.saved_custom[safe_name]!=cfg:
+                    st.error("This name is already saved. Change the scenario name, lock again, then save.")
+                else:
+                    st.session_state.saved_custom[safe_name]=copy.deepcopy(cfg)
+                    st.session_state.compare_custom=list(dict.fromkeys(
+                        [*st.session_state.get("compare_custom",[]),safe_name]))
+                    st.session_state.last_save=f"Saved {safe_name}. It is selected in Scenario comparison."
+                    st.rerun()
+            if run:
+                try:
+                    candidate=solve_config(json.loads(locked_json))
+                except (ValueError, AssertionError) as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state.active_json=locked_json
+                    st.session_state.active_result=candidate
+                    st.session_state.last_run=f"{safe_name}: {status_label(candidate)}"
+                    st.rerun()
+        elif locked_json:
+            st.info("The draft changed after the previous lock. Review your inputs and press Lock decisions again before optimizing or saving.")
+        else:
+            st.info("The solver has not run on this draft. Finish editing, then lock decisions to enable Optimize and Save.")
+        if st.session_state.get("last_run"):
+            st.success(st.session_state.last_run + " · See Executive view for the result.")
+        if st.session_state.get("last_save"):
+            st.success(st.session_state.last_save)
+        st.caption("Locking is a snapshot, not an optimization run. Any edit after locking invalidates the lock. Saved scenarios remain available during this browser session; export them from Saved scenarios for later use.")
 
 
 def render_scenario_library() -> None:
@@ -551,33 +608,46 @@ def render_scenario_library() -> None:
         st.session_state.scenario_detail_name="Base"
     chosen=st.selectbox("Scenario to inspect",options,key="scenario_detail_name")
     cfg=preset(chosen,DATA) if chosen in PRESET_LABELS else saved[chosen]
-    st.caption("Case preset" if chosen in PRESET_LABELS else "Your saved scenario")
+    origin=cfg.get("origin_preset", "Base") if chosen not in PRESET_LABELS else "Base"
+    if origin not in PRESET_LABELS:
+        origin="Base"
+    reference=preset(origin,DATA)
+    st.caption(("Case preset" if chosen in PRESET_LABELS else "Your saved scenario")+
+               f" · Red cells differ from {origin}.")
     st.metric("Demand",f"{sum(cfg['demand_mt']):.3f} Mt")
+    def site_rows(c: dict) -> list[dict]:
+        return ([{"Site":s["id"],"Location":s["name"],"Decision":c["integrated_choices"][s["id"]]}
+                 for s in DATA["integrated_sites"]] +
+                [{"Site":s["id"],"Location":s["name"],"Decision":c["split_choices"][s["id"]]}
+                 for s in DATA["split_sites"]])
+    def demand_rows(c: dict) -> list[dict]:
+        return [{"Market":m["id"],"Centre":m["centre"],"Demand Mt":round(c["demand_mt"][j],5)}
+                for j,m in enumerate(DATA["markets"])]
+    def rate_rows(c: dict) -> list[dict]:
+        return [{"Input":key,"Value":value} for key,value in (
+            ("Cement freight ₹/t-km",c["cement_rate"]),
+            ("Clinker freight ₹/t-km",c["clinker_rate"]),
+            ("Clinker factor t/t cement",c["clinker_factor"]),
+            ("Limestone t/t clinker",c["limestone_requirement"]),
+            ("Capex multiplier",c["capex_multiplier"]),
+            ("Fixed opex multiplier",c["opex_multiplier"]),
+            ("Max utilization %",round(100*c["utilization"],1)),
+            ("Max cement lane km",c["cement_limit_km"]),
+            ("Max clinker lane km",c["clinker_limit_km"]))]
+    def site_cost_rows(c: dict) -> list[dict]:
+        return ([{"Site":sid,"Limestone ₹/t":c["limestone_rates"][sid],
+            "Clinker capacity %":c["integrated_clinker_capacity_pct"][sid],
+            "Grinding capacity %":c["integrated_grinding_capacity_pct"][sid]} for sid in I]
+            + [{"Site":sid,"Limestone ₹/t":"—","Clinker capacity %":"—",
+                "Grinding capacity %":c["split_grinding_capacity_pct"][sid]} for sid in G])
     st.markdown("**Site decisions**")
-    light_table([{"Site":sid,"Location":site["name"],"Decision":cfg["integrated_choices"][sid]}
-        for site in DATA["integrated_sites"] for sid in [site["id"]]]+
-        [{"Site":sid,"Location":site["name"],"Decision":cfg["split_choices"][sid]}
-         for site in DATA["split_sites"] for sid in [site["id"]]])
+    light_table(site_rows(cfg),site_rows(reference))
     st.markdown("**Demand by market**")
-    light_table([{"Market":m["id"],"Centre":m["centre"],"Demand Mt":round(cfg["demand_mt"][j],4)}
-        for j,m in enumerate(DATA["markets"])])
+    light_table(demand_rows(cfg),demand_rows(reference))
     st.markdown("**Rates, efficiency and route limits**")
-    light_table([{"Input":key,"Value":value} for key,value in (
-        ("Cement freight ₹/t-km",cfg["cement_rate"]),
-        ("Clinker freight ₹/t-km",cfg["clinker_rate"]),
-        ("Clinker factor t/t cement",cfg["clinker_factor"]),
-        ("Limestone t/t clinker",cfg["limestone_requirement"]),
-        ("Capex multiplier",cfg["capex_multiplier"]),
-        ("Fixed opex multiplier",cfg["opex_multiplier"]),
-        ("Max utilization %",round(100*cfg["utilization"],1)),
-        ("Max cement lane km",cfg["cement_limit_km"]),
-        ("Max clinker lane km",cfg["clinker_limit_km"]))])
+    light_table(rate_rows(cfg),rate_rows(reference))
     st.markdown("**Site limestone rates and nameplate changes**")
-    light_table([{"Site":sid,"Limestone ₹/t":cfg["limestone_rates"][sid],
-        "Clinker capacity %":cfg["integrated_clinker_capacity_pct"][sid],
-        "Grinding capacity %":cfg["integrated_grinding_capacity_pct"][sid]}
-        for sid in I]+[{"Site":sid,"Limestone ₹/t":"—","Clinker capacity %":"—",
-                         "Grinding capacity %":cfg["split_grinding_capacity_pct"][sid]} for sid in G])
+    light_table(site_cost_rows(cfg),site_cost_rows(reference))
     if chosen in saved:
         if st.button(f"Delete {chosen}",key="delete_saved"):
             del saved[chosen]
