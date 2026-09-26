@@ -73,6 +73,27 @@ st.markdown("""
         background-color: #08736e !important; color: #ffffff !important;
     }
     [data-testid="stBaseButton-primary"] * {color: #ffffff !important;}
+    [data-testid="stMain"] [data-baseweb="select"] > div,
+    [data-testid="stMain"] [data-baseweb="input"] > div {
+        background: #ffffff !important; color: #183344 !important;
+        border-color: #9ab8b6 !important;
+    }
+    [data-testid="stMain"] input,
+    [data-testid="stMain"] [data-baseweb="select"] * {
+        color: #183344 !important;
+    }
+    [data-testid="stMain"] [data-testid="stWidgetLabel"] *,
+    [data-testid="stMain"] [data-testid="stCaptionContainer"] * {
+        color: #45606b !important;
+    }
+    [data-testid="stMain"] [data-testid="stSlider"] [role="slider"] {
+        background: #08736e !important; border-color: #08736e !important;
+    }
+    .case-table {border-collapse: collapse; width: 100%; background: #fff;
+        color: #183344; margin: .5rem 0 1rem; font-size: .92rem;}
+    .case-table th {text-align: left; background: #eaf3f1; color: #183344;
+        font-weight: 700; padding: .65rem .8rem; border-bottom: 1px solid #c9dcda;}
+    .case-table td {padding: .55rem .8rem; border-bottom: 1px solid #e0ebea;}
     .eyebrow {font-size: .78rem; font-weight: 700; letter-spacing: .14em;
         color: #08736e; margin-bottom: .4rem;}
     .intro {font-size: 1.08rem; color: #526778; max-width: 900px;}
@@ -105,6 +126,11 @@ def money(v: float | None, dec: int = 1) -> str:
 
 def km(v: float | None) -> str:
     return "N/A" if v is None else f"{v:,.0f} km"
+
+
+def light_table(rows: list[dict]) -> None:
+    st.markdown(pd.DataFrame(rows).to_html(index=False, classes="case-table", border=0),
+                unsafe_allow_html=True)
 
 
 def badge_rows(res: dict) -> pd.DataFrame:
@@ -208,7 +234,8 @@ def scenario_explanation(res: dict, baseline: dict, cfg: dict) -> list[str]:
     tight = [u["site"] + " " + u["process"].lower() for u in res["site_utilization"]
              if u["utilization"] >= cfg["utilization"] - 1e-5]
     if tight:
-        lines.append("At the planning utilization limit: " + ", ".join(tight[:7]) + ("…" if len(tight) > 7 else "") + ".")
+        lines.append(f"At the {100*cfg['utilization']:.0f}% planning utilization limit: "
+                     + ", ".join(tight) + ".")
     return lines
 
 
@@ -246,7 +273,7 @@ def render_solution(res: dict, baseline: dict) -> None:
         fig.update_layout(height=345, paper_bgcolor="rgba(0,0,0,0)", showlegend=True,
                           legend={"orientation":"h","y":-0.13,"x":0},
                           margin=dict(l=5,r=5,t=10,b=55), font={"family":"Arial","color":"#183344"})
-        st.plotly_chart(fig, width="stretch", key=f"cost_{res['name']}")
+        st.plotly_chart(fig, width="stretch", key=f"cost_{res['name']}", theme=None)
     st.subheader("Decision brief")
     for line in scenario_explanation(res,baseline,json.loads(st.session_state.active_json)):
         st.markdown("- " + line)
@@ -261,8 +288,10 @@ def render_decision_studio() -> None:
     p = preset(starting, DATA)
     tag = list(PRESET_LABELS).index(starting)
     name = st.text_input("Scenario name", value=f"Custom from {starting}", key=f"scenario_name_{tag}")
+    st.caption("Customize any section below, then use Optimize here or at the bottom. Freight rates and cost multipliers are in Freight & costs.")
+    run_top = st.button("Optimize this decision", type="primary", width="stretch", key="run_custom_top")
     facilities, markets, capacities, economics, rules = st.tabs(
-        ["Sites on/off", "Market demand", "Rated capacity", "Costs & materials", "Route rules"])
+        ["Sites on/off", "Market demand", "Rated capacity", "Freight & costs", "Route rules"])
 
     with facilities:
         st.caption("On + Optimize: the solver may open or close the site. On + Open: it must open and the solver chooses S/M/L. On + S/M/L: that size is required. Off: forced closed.")
@@ -286,45 +315,63 @@ def render_decision_studio() -> None:
                 target[sid] = choice if on else "Closed"
 
     with markets:
-        st.caption("Enter percentage changes by market. For example, +10 increases M1's preset demand from 3.995 to 4.3945 Mt when starting from Base.")
-        market_table = pd.DataFrame([{"Market": m["id"], "Centre": m["centre"],
-                                      "Preset Mt": p["demand_mt"][j], "Change %": 0.0}
-                                     for j, m in enumerate(DATA["markets"])])
-        edited_demand = st.data_editor(market_table, hide_index=True, width="stretch",
-            disabled=["Market", "Centre", "Preset Mt"], num_rows="fixed", key=f"market_pct_{tag}",
-            column_config={"Preset Mt": st.column_config.NumberColumn(format="%.3f"),
-                           "Change %": st.column_config.NumberColumn(min_value=-100., max_value=300., step=1., format="%+.1f%%", required=True)})
-        demands = [float(row["Preset Mt"])*(1+float(row["Change %"])/100)
-                   for _, row in edited_demand.iterrows()]
-        preview = edited_demand[["Market", "Centre", "Preset Mt", "Change %"]].copy()
-        preview["New demand Mt"] = demands
-        st.dataframe(preview, hide_index=True, width="stretch")
+        st.caption("Each row shows the selected preset demand and the adjusted demand together. When Scenario A is selected, its demand is the Preset Mt value; there is no second Scenario A demand to enter. Use ▲/▼ or type a percentage.")
+        head = st.columns([.65, 1.65, 1.1, 2.1, 1.2])
+        for col, label in zip(head, ("Market", "Centre", "Preset Mt", "Change %", "New Mt")):
+            col.markdown(f"**{label}**")
+        demands=[]
+        for j, market in enumerate(DATA["markets"]):
+            sid=market["id"]
+            cols=st.columns([.65, 1.65, 1.1, 2.1, 1.2], vertical_alignment="center")
+            cols[0].write(sid)
+            cols[1].write(market["centre"])
+            cols[2].write(f"{p['demand_mt'][j]:.3f}")
+            pct_key=f"demand_pct_{tag}_{sid}"
+            st.session_state.setdefault(pct_key, 0.0)
+            down, number, up=cols[3].columns([.7, 1.8, .7], vertical_alignment="center")
+            if down.button("▼", key=f"demand_down_{tag}_{sid}", help=f"Decrease {sid} demand change by 1 percentage point"):
+                st.session_state[pct_key]=max(-100.0, float(st.session_state[pct_key])-1)
+            if up.button("▲", key=f"demand_up_{tag}_{sid}", help=f"Increase {sid} demand change by 1 percentage point"):
+                st.session_state[pct_key]=min(300.0, float(st.session_state[pct_key])+1)
+            change=number.number_input(f"{sid} change %", -100.0, 300.0, step=1.0,
+                key=pct_key, label_visibility="collapsed", format="%.1f")
+            adjusted=float(p["demand_mt"][j])*(1+change/100)
+            cols[4].markdown(f"**{adjusted:.3f}**")
+            demands.append(adjusted)
         st.metric("New total demand", f"{sum(demands):.3f} Mt",
                   f"{sum(demands)-sum(p['demand_mt']):+.3f} Mt vs selected preset")
 
     with capacities:
         st.caption("Change rated nameplate capacity by site and process. The 90% planning utilization ceiling (editable in Route rules) applies to these adjusted capacities. Capacity changes do not automatically change module investment or fixed operating cost.")
         with st.expander("Original S / M / L module capacities"):
-            st.dataframe(pd.DataFrame([{"Type": "Integrated", "Module": m["id"],
+            light_table([{"Type": "Integrated", "Module": m["id"],
                 "Clinker Mtpa": m["clinker_mtpa"], "Grinding Mtpa": m["grinding_mtpa"]}
                 for m in DATA["integrated_modules"]] +
                 [{"Type": "Split grinder", "Module": m["id"], "Clinker Mtpa": None,
-                  "Grinding Mtpa": m["grinding_mtpa"]} for m in DATA["split_modules"]]),
-                hide_index=True, width="stretch")
-        integrated_cap = st.data_editor(pd.DataFrame([{"Site":s["id"], "Location":s["name"],
-            "Clinker change %":p["integrated_clinker_capacity_pct"][s["id"]],
-            "Grinding change %":p["integrated_grinding_capacity_pct"][s["id"]]}
-            for s in DATA["integrated_sites"]]), hide_index=True, width="stretch", num_rows="fixed",
-            disabled=["Site", "Location"], key=f"icap_{tag}",
-            column_config={col:st.column_config.NumberColumn(min_value=-98., max_value=300., step=1., format="%+.1f%%", required=True)
-                           for col in ("Clinker change %", "Grinding change %")})
-        split_cap = st.data_editor(pd.DataFrame([{"Site":s["id"], "Location":s["name"],
-            "Grinding change %":p["split_grinding_capacity_pct"][s["id"]]}
-            for s in DATA["split_sites"]]), hide_index=True, width="stretch", num_rows="fixed",
-            disabled=["Site", "Location"], key=f"gcap_{tag}",
-            column_config={"Grinding change %":st.column_config.NumberColumn(min_value=-98., max_value=300., step=1., format="%+.1f%%", required=True)})
+                  "Grinding Mtpa": m["grinding_mtpa"]} for m in DATA["split_modules"]])
+        st.markdown("**Integrated plants · percentage change from original nameplate**")
+        integrated_cap={}
+        for site in DATA["integrated_sites"]:
+            sid=site["id"]
+            label, clinker_col, grind_col=st.columns([2, 1.2, 1.2], vertical_alignment="center")
+            label.write(f"{sid} · {site['name']}")
+            ck=clinker_col.number_input(f"{sid} clinker capacity change %", -98.0, 300.0,
+                float(p["integrated_clinker_capacity_pct"][sid]), 1.0, key=f"icap_ck_{tag}_{sid}")
+            gr=grind_col.number_input(f"{sid} grinding capacity change %", -98.0, 300.0,
+                float(p["integrated_grinding_capacity_pct"][sid]), 1.0, key=f"icap_gr_{tag}_{sid}")
+            integrated_cap[sid]=(ck,gr)
+        st.markdown("**Split grinders · percentage change from original nameplate**")
+        split_cap={}
+        for site in DATA["split_sites"]:
+            sid=site["id"]
+            label, adjust=st.columns([2, 1.2], vertical_alignment="center")
+            label.write(f"{sid} · {site['name']}")
+            split_cap[sid]=adjust.number_input(f"{sid} grinding capacity change %", -98.0, 300.0,
+                float(p["split_grinding_capacity_pct"][sid]), 1.0, key=f"gcap_gr_{tag}_{sid}")
 
     with economics:
+        st.subheader("Freight rates")
+        st.caption("These are editable ₹ per tonne-kilometre rates. The solver applies them to each legal cement or clinker lane.")
         f1,f2 = st.columns(2)
         with f1:
             cement_rate = st.number_input("Cement freight (₹/t-km)", 0.01, 20., float(p["cement_rate"]), .05,
@@ -333,17 +380,16 @@ def render_decision_studio() -> None:
             clinker_rate = st.number_input("Clinker freight (₹/t-km)", 0.01, 20., float(p["clinker_rate"]), .05,
                                            key=f"clinker_{tag}")
         st.markdown("**Limestone cost at each integrated plant**")
-        limestone_table = pd.DataFrame([{"Site":s["id"], "Location":s["name"],
-            "Preset ₹/t":p["limestone_rates"][s["id"]], "Change %":0.0}
-            for s in DATA["integrated_sites"]])
-        limestone_edit = st.data_editor(limestone_table, hide_index=True, width="stretch",
-            disabled=["Site", "Location", "Preset ₹/t"], num_rows="fixed", key=f"lime_pct_{tag}",
-            column_config={"Change %":st.column_config.NumberColumn(min_value=-100., max_value=300., step=1., format="%+.1f%%", required=True)})
-        lime_rates = {row["Site"]:float(row["Preset ₹/t"])*(1+float(row["Change %"])/100)
-                      for _, row in limestone_edit.iterrows()}
-        lime_preview=limestone_edit.copy()
-        lime_preview["New ₹/t"]=[lime_rates[sid] for sid in lime_preview["Site"]]
-        st.dataframe(lime_preview, hide_index=True, width="stretch")
+        lime_rates={}
+        for site in DATA["integrated_sites"]:
+            sid=site["id"]
+            label, original, adjustment, changed=st.columns([2, 1, 1.2, 1], vertical_alignment="center")
+            label.write(f"{sid} · {site['name']}")
+            original.write(f"Preset ₹{p['limestone_rates'][sid]:.0f}/t")
+            change=adjustment.number_input(f"{sid} limestone change %", -100.0, 300.0,
+                0.0, 1.0, key=f"lime_change_{tag}_{sid}")
+            lime_rates[sid]=p["limestone_rates"][sid]*(1+change/100)
+            changed.write(f"New ₹{lime_rates[sid]:.2f}/t")
         st.caption("Limestone is purchased at integrated sites; no separate limestone freight lane is specified in the case.")
         m1,m2 = st.columns(2)
         with m1:
@@ -360,7 +406,7 @@ def render_decision_studio() -> None:
                 for m in DATA["integrated_modules"]] +
                 [{"Type":"Split grinder", "Module":m["id"], "Capex ₹ cr":m["capex_cr"], "Fixed opex ₹ cr/year":m["fixed_opex_cr_yr"]}
                  for m in DATA["split_modules"]])
-            st.dataframe(module_costs, hide_index=True, width="stretch")
+            light_table(module_costs.to_dict("records"))
             st.caption("These are the original inputs before applying your multipliers. The final network cost can change by a different percentage because the solver can change module choices and shipments.")
         c1,c2 = st.columns(2)
         with c1:
@@ -383,7 +429,8 @@ def render_decision_studio() -> None:
         st.caption("A route beyond its lane limit is excluded from the optimization. All markets still must receive their full target demand.")
 
     st.divider()
-    if st.button("Optimize this decision", type="primary", width="stretch", key="run_custom"):
+    run_bottom = st.button("Optimize this decision", type="primary", width="stretch", key="run_custom_bottom")
+    if run_top or run_bottom:
         cfg=copy.deepcopy(p)
         safe_name=name.strip() or "Custom"
         if safe_name in PRESET_LABELS:
@@ -393,9 +440,9 @@ def render_decision_studio() -> None:
             capex_multiplier=capex, opex_multiplier=opex, utilization=util,
             cement_limit_km=cem_limit, clinker_limit_km=klink_limit, demand_mt=demands,
             integrated_choices=choices_i, split_choices=choices_g, limestone_rates=lime_rates,
-            integrated_clinker_capacity_pct={r["Site"]:float(r["Clinker change %"]) for _,r in integrated_cap.iterrows()},
-            integrated_grinding_capacity_pct={r["Site"]:float(r["Grinding change %"]) for _,r in integrated_cap.iterrows()},
-            split_grinding_capacity_pct={r["Site"]:float(r["Grinding change %"]) for _,r in split_cap.iterrows()})
+            integrated_clinker_capacity_pct={sid:float(change[0]) for sid,change in integrated_cap.items()},
+            integrated_grinding_capacity_pct={sid:float(change[1]) for sid,change in integrated_cap.items()},
+            split_grinding_capacity_pct={sid:float(change) for sid,change in split_cap.items()})
         try:
             candidate=solve_config(cfg)
         except (ValueError, AssertionError) as exc:
@@ -461,7 +508,7 @@ with modes:
         else:
             st.warning(f"Redesign costs {money(-difference,2)} more than {ref_label.lower()}. Check whether custom site/module mandates restrict the redesign.")
         st.subheader("Where the cost changes")
-        st.plotly_chart(cost_bridge(ref,redesign,ref_label),width="stretch",key="mode_bridge")
+        st.plotly_chart(cost_bridge(ref,redesign,ref_label),width="stretch",key="mode_bridge",theme=None)
         components=list(ref["cost_breakdown_cr"])
         bridge_table=pd.DataFrame([{"Cost component":key,
                                     f"{ref_label} ₹ cr":ref["cost_breakdown_cr"][key],
@@ -537,8 +584,9 @@ with compare:
                                  text=[f"₹{v:,.0f}" for v in feasible["Annual cost ₹ cr"]],textposition="outside"))
             fig.update_layout(height=max(330,65*len(feasible)),margin=dict(l=10,r=65,t=20,b=45),
                               xaxis_title="Annual relevant cost (₹ crore)",yaxis={"autorange":"reversed"},
-                              paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig,width="stretch")
+                              paper_bgcolor="#f6fafb",plot_bgcolor="#f6fafb",
+                              template="plotly_white",font={"family":"Arial","color":"#183344"})
+            st.plotly_chart(fig,width="stretch",theme=None)
         st.caption("Fixed-module penalty compares a constrained Base-capacity solution with that scenario's own optimum under the same inputs. Infeasible fixed capacity is reported as such, not as a numeric penalty.")
         st.download_button("Download comparison (CSV)",comp.to_csv(index=False).encode("utf-8-sig"),
                            file_name="rookie_scenario_comparison.csv",mime="text/csv")
@@ -567,13 +615,21 @@ with sensitivity:
                  json.loads(st.session_state.active_json)[key]["I3"] if key=="limestone_rates" else
                  json.loads(st.session_state.active_json)[key])
     center=max(low,min(high,default_val))
-    range_col,points_col=st.columns([3,1])
+    st.caption("Set a low and high value for this one assumption. The app will test evenly spaced values between them, optimizing the entire network each time. Other inputs remain as in the current scenario.")
+    range_col,upper_col,points_col=st.columns(3)
     with range_col:
-        lower,upper=st.slider("Range",min_value=low,max_value=high,
-                              value=(max(low,round(center*.8,2)),min(high,round(center*1.2,2))))
+        lower=st.number_input("From",min_value=float(low),max_value=float(high),
+            value=float(max(low,round(center*.8,2))),step=.01,help="Lowest value to test")
+    with upper_col:
+        upper=st.number_input("To",min_value=float(low),max_value=float(high),
+            value=float(min(high,round(center*1.2,2))),step=.01,help="Highest value to test")
     with points_col:
-        points=st.select_slider("Number of solves",options=[5,7,9],value=7)
-    if st.button("Run sensitivity",type="primary"):
+        points=st.selectbox("Number of solves",[5,7,9],index=1,
+            help="The number of fresh optimization runs at evenly spaced input values. More solves give a smoother curve and take longer.")
+    st.caption(f"Example: {points} solves test {points} values from {lower:g} to {upper:g}, including both endpoints. This is an analysis of one input, separate from the Decision studio's main Optimize button.")
+    if lower>=upper:
+        st.warning("Set 'To' above 'From' to run the sensitivity analysis.")
+    if st.button("Run sensitivity",type="primary",disabled=lower>=upper):
         cfg_origin=json.loads(st.session_state.active_json)
         rows=[]
         for val in [lower+(upper-lower)*i/(points-1) for i in range(points)]:
@@ -603,8 +659,9 @@ with sensitivity:
                                      hovertemplate="Input: %{x:.3f}<br>Cost: ₹%{y:,.2f} cr<extra></extra>"))
             fig.update_layout(xaxis_title=sweep["parameter"],yaxis_title="Optimized annual cost (₹ crore)",
                               height=370,margin=dict(l=20,r=20,t=15,b=25),
-                              paper_bgcolor="rgba(0,0,0,0)",plot_bgcolor="rgba(0,0,0,0)")
-            st.plotly_chart(fig,width="stretch")
+                              paper_bgcolor="#f6fafb",plot_bgcolor="#f6fafb",
+                              template="plotly_white",font={"family":"Arial","color":"#183344"})
+            st.plotly_chart(fig,width="stretch",theme=None)
         st.dataframe(frame,hide_index=True,width="stretch",
                      column_config={"Cost ₹ cr":st.column_config.NumberColumn(format="₹%.2f")})
         st.caption("Changes in the input alter the economic environment. Review the module column for discrete investment switches; infeasible points have no cost.")
@@ -622,7 +679,7 @@ with network:
         cm,ck,util=st.tabs(["Cement routes","Clinker routes","Capacity use"])
         with cm:
             flows=active["integrated_cement_flows"]+active["split_cement_flows"]
-            st.plotly_chart(make_sankey(flows,"Finished cement: production site to market (Mt)","Mt","rgba(8,115,110,.27)"),width="stretch")
+            st.plotly_chart(make_sankey(flows,"Finished cement: production site to market (Mt)","Mt","rgba(8,115,110,.27)"),width="stretch",theme=None)
             st.dataframe(pd.DataFrame(flows).sort_values("mt",ascending=False).rename(columns={"source":"From","target":"Market","mt":"Mt","km":"km"}),
                          hide_index=True,width="stretch")
             st.download_button("Download cement routes (CSV)",pd.DataFrame(flows).to_csv(index=False).encode("utf-8-sig"),
@@ -630,7 +687,7 @@ with network:
         with ck:
             flows=active["clinker_flows"]
             if flows:
-                st.plotly_chart(make_sankey(flows,"Clinker: integrated plant to split grinder (Mt)","Mt","rgba(24,59,77,.29)"),width="stretch")
+                st.plotly_chart(make_sankey(flows,"Clinker: integrated plant to split grinder (Mt)","Mt","rgba(24,59,77,.29)"),width="stretch",theme=None)
                 st.dataframe(pd.DataFrame(flows).sort_values("mt",ascending=False).rename(columns={"source":"From","target":"Grinder","mt":"Mt","km":"km"}),
                              hide_index=True,width="stretch")
                 st.download_button("Download clinker routes (CSV)",pd.DataFrame(flows).to_csv(index=False).encode("utf-8-sig"),
