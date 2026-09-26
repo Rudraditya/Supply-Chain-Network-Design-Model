@@ -16,7 +16,7 @@ st.set_page_config(
     page_title="The Rookie | Cement Network Lab",
     page_icon="🏭",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 st.markdown("""
 <style>
@@ -45,8 +45,34 @@ st.markdown("""
     [data-testid="stSidebar"] > div > div > div > p {
         color: #f6fafb !important;
     }
-    button[data-baseweb="tab"] {color: #183344 !important;}
-    button[data-baseweb="tab"][aria-selected="true"] {color: #08736e !important;}
+    [data-testid="stMain"] [role="tab"], [data-testid="stMain"] [role="tab"] * {
+        color: #355260 !important;
+    }
+    [data-testid="stMain"] [role="tab"][aria-selected="true"],
+    [data-testid="stMain"] [role="tab"][aria-selected="true"] * {
+        color: #08736e !important; font-weight: 700 !important;
+        border-bottom-color: #08736e !important;
+    }
+    [data-testid="stMain"] [role="tab"]:hover,
+    [data-testid="stMain"] [role="tab"]:hover * {
+        color: #08736e !important; background-color: #e8f3f1 !important;
+    }
+    [data-testid="stMain"] [data-baseweb="tab-highlight"] {
+        background-color: #08736e !important;
+    }
+    [data-testid="stMain"] [data-testid="stBaseButton-secondary"],
+    [data-testid="stMain"] [data-testid="stDownloadButton"] button {
+        background-color: #ffffff !important; color: #183344 !important;
+        border: 1px solid #9ab8b6 !important;
+    }
+    [data-testid="stMain"] [data-testid="stBaseButton-secondary"] *,
+    [data-testid="stMain"] [data-testid="stDownloadButton"] button * {
+        color: #183344 !important;
+    }
+    [data-testid="stBaseButton-primary"] {
+        background-color: #08736e !important; color: #ffffff !important;
+    }
+    [data-testid="stBaseButton-primary"] * {color: #ffffff !important;}
     .eyebrow {font-size: .78rem; font-weight: 700; letter-spacing: .14em;
         color: #08736e; margin-bottom: .4rem;}
     .intro {font-size: 1.08rem; color: #526778; max-width: 900px;}
@@ -227,74 +253,162 @@ def render_solution(res: dict, baseline: dict) -> None:
     st.caption("The model includes annualized investment, fixed operating cost, limestone and both freight legs. It omits common conversion costs by case design.")
 
 
-def build_form() -> None:
-    st.sidebar.markdown("### Scenario builder")
-    starting = st.sidebar.selectbox("Start from a preset", list(PRESET_LABELS),
-                                    format_func=lambda x: f"{x} — {PRESET_LABELS[x]}")
+def render_decision_studio() -> None:
+    st.subheader("Decision studio")
+    st.write("Start with a case scenario, change any assumption, then optimize. A switch turned off forces a site closed. Percent changes apply to the selected preset, not automatically to Base.")
+    starting = st.selectbox("Start from a preset", list(PRESET_LABELS),
+                            format_func=lambda x: f"{x} — {PRESET_LABELS[x]}", key="studio_preset")
     p = preset(starting, DATA)
-    tag = starting.split(" · ")[0]
-    st.sidebar.caption("A selected preset seeds the controls below; you can change any input before optimizing.")
-    with st.sidebar.form("custom_form"):
-        name = st.text_input("Scenario name", value=f"Custom from {tag}", key=f"scenario_name_{tag}")
-        with st.expander("Facility and grinder choices", expanded=True):
-            i_df = pd.DataFrame([{ "Site": s["id"], "Location": s["name"],
-                                   "Module": p["integrated_choices"][s["id"]],
-                                   "Limestone ₹/t": p["limestone_rates"][s["id"]]}
-                                 for s in DATA["integrated_sites"]])
-            edited_i = st.data_editor(i_df, hide_index=True, width="stretch",
-                disabled=["Site", "Location"], num_rows="fixed", key=f"integrated_{tag}",
-                column_config={"Module": st.column_config.SelectboxColumn("Module", options=["Optimize","Open","Closed",*MODULES], required=True),
-                               "Limestone ₹/t": st.column_config.NumberColumn("Limestone ₹/t",min_value=0.0,max_value=1000.0,step=5.0,required=True,
-                                  help="Site-specific raw limestone cost. The source case does not specify a limestone freight lane.")})
-            g_df = pd.DataFrame([{"Site": s["id"], "Location": s["name"],
-                                   "Module": p["split_choices"][s["id"]]}
-                                 for s in DATA["split_sites"]])
-            edited_g = st.data_editor(g_df, hide_index=True, width="stretch",
-                disabled=["Site", "Location"], num_rows="fixed", key=f"split_{tag}",
-                column_config={"Module": st.column_config.SelectboxColumn("Module", options=["Optimize","Open","Closed",*MODULES], required=True)})
-            st.caption("Optimize allows a size or closure; Open requires a site but lets the solver choose S/M/L. Selecting S/M/L fixes that module; Closed forbids it.")
-            st.caption("Limestone is a site-specific input cost (₹/t), not a separate freight rate in the supplied case.")
-        with st.expander("Freight, material and capital", expanded=True):
-            cement_rate = st.number_input("Cement freight (₹/t-km)",0.01,20.0,float(p["cement_rate"]),0.05)
-            clinker_rate = st.number_input("Clinker freight (₹/t-km)",0.01,20.0,float(p["clinker_rate"]),0.05)
-            clinker_factor = st.number_input("Clinker factor (t/t cement)",0.40,1.20,float(p["clinker_factor"]),0.01,
-                                             help="The case uses 0.66. A lower factor means less clinker for each tonne of cement.")
-            limestone_requirement = st.number_input("Limestone (t/t clinker)",0.80,2.50,float(p["limestone_requirement"]),0.05)
-            capex = st.number_input("Capex multiplier",0.50,2.00,float(p["capex_multiplier"]),0.05)
-            opex = st.number_input("Fixed opex multiplier",0.50,2.00,float(p["opex_multiplier"]),0.05)
-        with st.expander("Demand and lane rules"):
-            util = st.slider("Maximum planned utilization",0.50,1.00,float(p["utilization"]),0.01)
-            cem_limit = st.number_input("Max cement lane (km)",100,2500,int(p["cement_limit_km"]),50)
-            klink_limit = st.number_input("Max clinker lane (km)",100,3000,int(p["clinker_limit_km"]),50)
-            demand_df = pd.DataFrame([{"Market": m["id"], "Demand centre": m["centre"],
-                                        "Target Mt": p["demand_mt"][j]}
-                                       for j,m in enumerate(DATA["markets"])])
-            edited_demand = st.data_editor(demand_df,hide_index=True,width="stretch",
-                disabled=["Market","Demand centre"],num_rows="fixed",key=f"demand_{tag}",
-                column_config={"Target Mt":st.column_config.NumberColumn("Target Mt",min_value=0.0,max_value=20.0,step=0.01,format="%.3f",required=True)})
-        run = st.form_submit_button("Optimize scenario",type="primary",width="stretch")
-    if run:
+    tag = list(PRESET_LABELS).index(starting)
+    name = st.text_input("Scenario name", value=f"Custom from {starting}", key=f"scenario_name_{tag}")
+    facilities, markets, capacities, economics, rules = st.tabs(
+        ["Sites on/off", "Market demand", "Rated capacity", "Costs & materials", "Route rules"])
+
+    with facilities:
+        st.caption("On + Optimize: the solver may open or close the site. On + Open: it must open and the solver chooses S/M/L. On + S/M/L: that size is required. Off: forced closed.")
+        choices_i, choices_g = {}, {}
+        for heading, sites, source, target, prefix in (
+            ("Integrated plants", DATA["integrated_sites"], p["integrated_choices"], choices_i, "i"),
+            ("Split grinders", DATA["split_sites"], p["split_choices"], choices_g, "g")):
+            st.markdown(f"**{heading}**")
+            for site in sites:
+                sid = site["id"]
+                label_col, toggle_col, module_col = st.columns([2.5, 1.1, 2.0], vertical_alignment="center")
+                label_col.markdown(f"**{sid}** · {site['name']}")
+                on = toggle_col.toggle("On / off", value=source[sid] != "Closed",
+                                       key=f"site_{prefix}_{sid}_{tag}", label_visibility="collapsed",
+                                       help=f"{sid}: turn off to force closure")
+                initial = source[sid] if source[sid] != "Closed" else "Optimize"
+                choice = module_col.selectbox(f"{sid} module", ["Optimize", "Open", *MODULES],
+                                              index=["Optimize", "Open", *MODULES].index(initial),
+                                              key=f"module_{prefix}_{sid}_{tag}",
+                                              label_visibility="collapsed", disabled=not on)
+                target[sid] = choice if on else "Closed"
+
+    with markets:
+        st.caption("Enter percentage changes by market. For example, +10 increases M1's preset demand from 3.995 to 4.3945 Mt when starting from Base.")
+        market_table = pd.DataFrame([{"Market": m["id"], "Centre": m["centre"],
+                                      "Preset Mt": p["demand_mt"][j], "Change %": 0.0}
+                                     for j, m in enumerate(DATA["markets"])])
+        edited_demand = st.data_editor(market_table, hide_index=True, width="stretch",
+            disabled=["Market", "Centre", "Preset Mt"], num_rows="fixed", key=f"market_pct_{tag}",
+            column_config={"Preset Mt": st.column_config.NumberColumn(format="%.3f"),
+                           "Change %": st.column_config.NumberColumn(min_value=-100., max_value=300., step=1., format="%+.1f%%", required=True)})
+        demands = [float(row["Preset Mt"])*(1+float(row["Change %"])/100)
+                   for _, row in edited_demand.iterrows()]
+        preview = edited_demand[["Market", "Centre", "Preset Mt", "Change %"]].copy()
+        preview["New demand Mt"] = demands
+        st.dataframe(preview, hide_index=True, width="stretch")
+        st.metric("New total demand", f"{sum(demands):.3f} Mt",
+                  f"{sum(demands)-sum(p['demand_mt']):+.3f} Mt vs selected preset")
+
+    with capacities:
+        st.caption("Change rated nameplate capacity by site and process. The 90% planning utilization ceiling (editable in Route rules) applies to these adjusted capacities. Capacity changes do not automatically change module investment or fixed operating cost.")
+        with st.expander("Original S / M / L module capacities"):
+            st.dataframe(pd.DataFrame([{"Type": "Integrated", "Module": m["id"],
+                "Clinker Mtpa": m["clinker_mtpa"], "Grinding Mtpa": m["grinding_mtpa"]}
+                for m in DATA["integrated_modules"]] +
+                [{"Type": "Split grinder", "Module": m["id"], "Clinker Mtpa": None,
+                  "Grinding Mtpa": m["grinding_mtpa"]} for m in DATA["split_modules"]]),
+                hide_index=True, width="stretch")
+        integrated_cap = st.data_editor(pd.DataFrame([{"Site":s["id"], "Location":s["name"],
+            "Clinker change %":p["integrated_clinker_capacity_pct"][s["id"]],
+            "Grinding change %":p["integrated_grinding_capacity_pct"][s["id"]]}
+            for s in DATA["integrated_sites"]]), hide_index=True, width="stretch", num_rows="fixed",
+            disabled=["Site", "Location"], key=f"icap_{tag}",
+            column_config={col:st.column_config.NumberColumn(min_value=-98., max_value=300., step=1., format="%+.1f%%", required=True)
+                           for col in ("Clinker change %", "Grinding change %")})
+        split_cap = st.data_editor(pd.DataFrame([{"Site":s["id"], "Location":s["name"],
+            "Grinding change %":p["split_grinding_capacity_pct"][s["id"]]}
+            for s in DATA["split_sites"]]), hide_index=True, width="stretch", num_rows="fixed",
+            disabled=["Site", "Location"], key=f"gcap_{tag}",
+            column_config={"Grinding change %":st.column_config.NumberColumn(min_value=-98., max_value=300., step=1., format="%+.1f%%", required=True)})
+
+    with economics:
+        f1,f2 = st.columns(2)
+        with f1:
+            cement_rate = st.number_input("Cement freight (₹/t-km)", 0.01, 20., float(p["cement_rate"]), .05,
+                                          key=f"cement_{tag}")
+        with f2:
+            clinker_rate = st.number_input("Clinker freight (₹/t-km)", 0.01, 20., float(p["clinker_rate"]), .05,
+                                           key=f"clinker_{tag}")
+        st.markdown("**Limestone cost at each integrated plant**")
+        limestone_table = pd.DataFrame([{"Site":s["id"], "Location":s["name"],
+            "Preset ₹/t":p["limestone_rates"][s["id"]], "Change %":0.0}
+            for s in DATA["integrated_sites"]])
+        limestone_edit = st.data_editor(limestone_table, hide_index=True, width="stretch",
+            disabled=["Site", "Location", "Preset ₹/t"], num_rows="fixed", key=f"lime_pct_{tag}",
+            column_config={"Change %":st.column_config.NumberColumn(min_value=-100., max_value=300., step=1., format="%+.1f%%", required=True)})
+        lime_rates = {row["Site"]:float(row["Preset ₹/t"])*(1+float(row["Change %"])/100)
+                      for _, row in limestone_edit.iterrows()}
+        lime_preview=limestone_edit.copy()
+        lime_preview["New ₹/t"]=[lime_rates[sid] for sid in lime_preview["Site"]]
+        st.dataframe(lime_preview, hide_index=True, width="stretch")
+        st.caption("Limestone is purchased at integrated sites; no separate limestone freight lane is specified in the case.")
+        m1,m2 = st.columns(2)
+        with m1:
+            clinker_factor = st.number_input("Clinker per tonne of cement", .40, 1.20,
+                float(p["clinker_factor"]), .01, key=f"factor_{tag}",
+                help="Default 0.66 t clinker / t cement. A lower value reduces clinker needed for every tonne of cement.")
+        with m2:
+            limestone_requirement = st.number_input("Limestone per tonne of clinker", .80, 2.50,
+                float(p["limestone_requirement"]), .05, key=f"requirement_{tag}")
+        st.markdown("**Module investment and fixed operations**")
+        with st.popover("ⓘ What do capex and opex multipliers mean?"):
+            st.write("1.00 uses the case costs; 1.20 raises that category's costs by 20%; 0.80 reduces them by 20%. Capex is charged through an annualized capital recovery factor (11% hurdle rate, 20-year asset life). Fixed opex is an annual site cost.")
+            module_costs = pd.DataFrame([{"Type":"Integrated", "Module":m["id"], "Capex ₹ cr":m["capex_cr"], "Fixed opex ₹ cr/year":m["fixed_opex_cr_yr"]}
+                for m in DATA["integrated_modules"]] +
+                [{"Type":"Split grinder", "Module":m["id"], "Capex ₹ cr":m["capex_cr"], "Fixed opex ₹ cr/year":m["fixed_opex_cr_yr"]}
+                 for m in DATA["split_modules"]])
+            st.dataframe(module_costs, hide_index=True, width="stretch")
+            st.caption("These are the original inputs before applying your multipliers. The final network cost can change by a different percentage because the solver can change module choices and shipments.")
+        c1,c2 = st.columns(2)
+        with c1:
+            capex = st.number_input("Capex multiplier", .10, 3.0, float(p["capex_multiplier"]), .05,
+                key=f"capex_{tag}", help="Multiplies each selected module's original investment before annualization. 1.00 = case amount.")
+        with c2:
+            opex = st.number_input("Fixed opex multiplier", .10, 3.0, float(p["opex_multiplier"]), .05,
+                key=f"opex_{tag}", help="Multiplies each selected module's annual fixed operating cost. 1.00 = case amount.")
+
+    with rules:
+        util = st.slider("Maximum planned utilization", .50, 1.00, float(p["utilization"]), .01,
+                         key=f"util_{tag}")
+        r1,r2 = st.columns(2)
+        with r1:
+            cem_limit = st.number_input("Max cement lane (km)", 100, 2500,
+                                        int(p["cement_limit_km"]), 50, key=f"cemlimit_{tag}")
+        with r2:
+            klink_limit = st.number_input("Max clinker lane (km)", 100, 3000,
+                                          int(p["clinker_limit_km"]), 50, key=f"klinklimit_{tag}")
+        st.caption("A route beyond its lane limit is excluded from the optimization. All markets still must receive their full target demand.")
+
+    st.divider()
+    if st.button("Optimize this decision", type="primary", width="stretch", key="run_custom"):
         cfg=copy.deepcopy(p)
         safe_name=name.strip() or "Custom"
         if safe_name in PRESET_LABELS:
             safe_name=f"Custom: {safe_name}"
-        cfg.update(name=safe_name,cement_rate=cement_rate,clinker_rate=clinker_rate,
-                   clinker_factor=clinker_factor,limestone_requirement=limestone_requirement,
-                   capex_multiplier=capex,opex_multiplier=opex,utilization=util,
-                   cement_limit_km=cem_limit,clinker_limit_km=klink_limit,
-                   demand_mt=[float(v) for v in edited_demand["Target Mt"]],
-                   integrated_choices={r["Site"]:r["Module"] for _,r in edited_i.iterrows()},
-                   split_choices={r["Site"]:r["Module"] for _,r in edited_g.iterrows()},
-                   limestone_rates={r["Site"]:float(r["Limestone ₹/t"]) for _,r in edited_i.iterrows()})
+        cfg.update(name=safe_name, cement_rate=cement_rate, clinker_rate=clinker_rate,
+            clinker_factor=clinker_factor, limestone_requirement=limestone_requirement,
+            capex_multiplier=capex, opex_multiplier=opex, utilization=util,
+            cement_limit_km=cem_limit, clinker_limit_km=klink_limit, demand_mt=demands,
+            integrated_choices=choices_i, split_choices=choices_g, limestone_rates=lime_rates,
+            integrated_clinker_capacity_pct={r["Site"]:float(r["Clinker change %"]) for _,r in integrated_cap.iterrows()},
+            integrated_grinding_capacity_pct={r["Site"]:float(r["Grinding change %"]) for _,r in integrated_cap.iterrows()},
+            split_grinding_capacity_pct={r["Site"]:float(r["Grinding change %"]) for _,r in split_cap.iterrows()})
         try:
             candidate=solve_config(cfg)
-        except (ValueError,AssertionError) as exc:
-            st.sidebar.error(str(exc))
+        except (ValueError, AssertionError) as exc:
+            st.error(str(exc))
         else:
-            st.session_state["active_json"]=json.dumps(cfg,sort_keys=True)
-            st.session_state["active_result"]=candidate
-            st.session_state["saved_custom"][cfg["name"]]=cfg
-            st.sidebar.success(f"{cfg['name']}: {status_label(candidate)}")
+            st.session_state.active_json=json.dumps(cfg,sort_keys=True)
+            st.session_state.active_result=candidate
+            st.session_state.saved_custom[cfg["name"]]=cfg
+            st.session_state.last_run=f"{cfg['name']}: {status_label(candidate)}"
+            st.rerun()
+    if st.session_state.get("last_run"):
+        st.success(st.session_state.last_run + " · See Executive view for the result.")
+    st.caption("The last optimized result appears in Executive view, Decision modes and Network explorer. Your custom scenarios also appear in Scenario comparison.")
 
 
 if "saved_custom" not in st.session_state:
@@ -304,19 +418,20 @@ if "active_json" not in st.session_state:
 if "active_result" not in st.session_state:
     st.session_state.active_result=solve_cached(BASE_JSON)
 
-build_form()
 baseline=solve_cached(BASE_JSON)
 active=st.session_state.active_result
 st.markdown('<div class="eyebrow">PRESCRIPTIVE ANALYTICS  ·  FY2030</div>',unsafe_allow_html=True)
 st.title("The Rookie | Cement Network Lab")
-st.markdown('<p class="intro">Choose facilities, prices, material efficiency and regional demand. The MILP reoptimizes clinker and cement flows, explains the new footprint, and tests whether the original Base modules still work.</p>',unsafe_allow_html=True)
+st.markdown('<p class="intro">Use the Decision studio to change facilities, capacity, prices, material efficiency and market demand. The MILP reoptimizes clinker and cement flows, explains the new footprint, and tests whether the original Base modules still work.</p>',unsafe_allow_html=True)
 
-view,modes,compare,sensitivity,network,method=st.tabs(["Executive view","Decision modes","Scenario comparison","Sensitivity lab","Network explorer","Model & interview notes"])
+view,studio,modes,compare,sensitivity,network,method=st.tabs(["Executive view","Decision studio","Decision modes","Scenario comparison","Sensitivity lab","Network explorer","Model & interview notes"])
 with view:
     st.subheader(f"Current decision: {active['name']}")
     render_solution(active,baseline)
     st.download_button("Download scenario settings (JSON)",st.session_state.active_json,
                        file_name="rookie_scenario.json",mime="application/json")
+with studio:
+    render_decision_studio()
 with modes:
     scenario=json.loads(st.session_state.active_json)
     st.subheader(f"Keep, resize or redesign? · {scenario['name']}")
@@ -327,7 +442,7 @@ with modes:
         labels[1]:solve_config(resize_base_config(scenario,baseline)),
         labels[2]:active,
     }
-    st.caption("1 keeps each Base module size and reroutes flows. 2 keeps Base sites open/closed but may choose new sizes. 3 uses the scenario builder's site choices and may open or close sites. Scenario closures apply to every mode.")
+    st.caption("1 keeps each Base module size and reroutes flows. 2 keeps Base sites open/closed but may choose new sizes. 3 uses the Decision studio site choices and may open or close sites. Scenario closures apply to every mode.")
     mode_table=mode_comparison_rows(mode_results)
     st.dataframe(mode_table,hide_index=True,width="stretch",
                  column_config={"Annual cost ₹ cr":st.column_config.NumberColumn(format="₹%.2f"),

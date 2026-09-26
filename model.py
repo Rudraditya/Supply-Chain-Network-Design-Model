@@ -48,6 +48,9 @@ def base_config(data: dict[str, Any] | None = None) -> dict[str, Any]:
         "clinker_limit_km": d["clinker_lane_max_km"],
         "capex_multiplier": 1.0,
         "opex_multiplier": 1.0,
+        "integrated_clinker_capacity_pct": {s["id"]: 0.0 for s in data["integrated_sites"]},
+        "integrated_grinding_capacity_pct": {s["id"]: 0.0 for s in data["integrated_sites"]},
+        "split_grinding_capacity_pct": {s["id"]: 0.0 for s in data["split_sites"]},
         "integrated_choices": {s["id"]: "Optimize" for s in data["integrated_sites"]},
         "split_choices": {s["id"]: "Optimize" for s in data["split_sites"]},
     }
@@ -123,9 +126,17 @@ def validate_config(cfg: dict[str, Any], data: dict[str, Any]) -> None:
             raise ValueError(f"Invalid module choice for {sid}.")
         if not np.isfinite(cfg["limestone_rates"][sid]) or cfg["limestone_rates"][sid] < 0:
             raise ValueError(f"Limestone rate for {sid} must be nonnegative.")
+        for field in ("integrated_clinker_capacity_pct", "integrated_grinding_capacity_pct"):
+            v = cfg[field][sid]
+            if not np.isfinite(v) or not -99 < v <= 300:
+                raise ValueError(f"Capacity change for {sid} must be above -99% and at most +300%.")
     for site in data["split_sites"]:
-        if cfg["split_choices"].get(site["id"]) not in ("Optimize", "Open", "Closed", *MODULES):
-            raise ValueError(f"Invalid module choice for {site['id']}.")
+        sid = site["id"]
+        if cfg["split_choices"].get(sid) not in ("Optimize", "Open", "Closed", *MODULES):
+            raise ValueError(f"Invalid module choice for {sid}.")
+        v = cfg["split_grinding_capacity_pct"][sid]
+        if not np.isfinite(v) or not -99 < v <= 300:
+            raise ValueError(f"Capacity change for {sid} must be above -99% and at most +300%.")
 
 
 def _capacity_diagnostic(cfg: dict[str, Any], data: dict[str, Any]) -> list[str]:
@@ -138,10 +149,13 @@ def _capacity_diagnostic(cfg: dict[str, Any], data: dict[str, Any]) -> list[str]
         return next(m[field] for m in modules if m["id"] == choice)
 
     grind = sum(best(s["id"], cfg["integrated_choices"], data["integrated_modules"], "grinding_mtpa")
+                * (1 + cfg["integrated_grinding_capacity_pct"][s["id"]] / 100)
                 for s in data["integrated_sites"])
     grind += sum(best(s["id"], cfg["split_choices"], data["split_modules"], "grinding_mtpa")
+                 * (1 + cfg["split_grinding_capacity_pct"][s["id"]] / 100)
                  for s in data["split_sites"])
     clinker = sum(best(s["id"], cfg["integrated_choices"], data["integrated_modules"], "clinker_mtpa")
+                  * (1 + cfg["integrated_clinker_capacity_pct"][s["id"]] / 100)
                   for s in data["integrated_sites"])
     required = sum(cfg["demand_mt"])
     notes = []
@@ -249,18 +263,21 @@ def solve(cfg: dict[str, Any], data: dict[str, Any] | None = None,
         add(row, low=cfg["demand_mt"][m], high=cfg["demand_mt"][m])
     for i in range(6):
         row = {j: 1 for (ii, m), j in xi.items() if ii == i}
-        row.update({yi[i, k]: -util * data["integrated_modules"][k]["grinding_mtpa"] for k in range(3)})
+        row.update({yi[i, k]: -util * data["integrated_modules"][k]["grinding_mtpa"]
+                    * (1 + cfg["integrated_grinding_capacity_pct"][ids_i[i]] / 100) for k in range(3)})
         add(row, high=0)
         row = {j: alpha for (ii, m), j in xi.items() if ii == i}
         row.update({j: 1 for (ii, g), j in z.items() if ii == i})
-        row.update({yi[i, k]: -util * data["integrated_modules"][k]["clinker_mtpa"] for k in range(3)})
+        row.update({yi[i, k]: -util * data["integrated_modules"][k]["clinker_mtpa"]
+                    * (1 + cfg["integrated_clinker_capacity_pct"][ids_i[i]] / 100) for k in range(3)})
         add(row, high=0)
     for g in range(4):
         row = {j: 1 for (i, gg), j in z.items() if gg == g}
         row.update({j: -alpha for (gg, m), j in xg.items() if gg == g})
         add(row, low=0, high=0)
         row = {j: 1 for (gg, m), j in xg.items() if gg == g}
-        row.update({yg[g, k]: -util * data["split_modules"][k]["grinding_mtpa"] for k in range(3)})
+        row.update({yg[g, k]: -util * data["split_modules"][k]["grinding_mtpa"]
+                    * (1 + cfg["split_grinding_capacity_pct"][ids_g[g]] / 100) for k in range(3)})
         add(row, high=0)
 
     rr, cc, vv = [], [], []
@@ -300,17 +317,20 @@ def solve(cfg: dict[str, Any], data: dict[str, Any] | None = None,
         module = chosen_i[sid]
         if module != "Closed":
             mod = next(m for m in data["integrated_modules"] if m["id"] == module)
+            clinker_nameplate = mod["clinker_mtpa"] * (1 + cfg["integrated_clinker_capacity_pct"][sid] / 100)
+            grinding_nameplate = mod["grinding_mtpa"] * (1 + cfg["integrated_grinding_capacity_pct"][sid] / 100)
             site_util += [{"site": sid, "process": "Clinker", "module": module, "used_mt": used,
-                           "nameplate_mtpa": mod["clinker_mtpa"], "utilization": used/mod["clinker_mtpa"]},
+                           "nameplate_mtpa": clinker_nameplate, "utilization": used/clinker_nameplate},
                           {"site": sid, "process": "Grinding", "module": module, "used_mt": direct,
-                           "nameplate_mtpa": mod["grinding_mtpa"], "utilization": direct/mod["grinding_mtpa"]}]
+                           "nameplate_mtpa": grinding_nameplate, "utilization": direct/grinding_nameplate}]
     for g, sid in enumerate(ids_g):
         output = sum(e["mt"] for e in cement_g if e["source"] == sid)
         module = chosen_g[sid]
         if module != "Closed":
             mod = next(m for m in data["split_modules"] if m["id"] == module)
+            nameplate = mod["grinding_mtpa"] * (1 + cfg["split_grinding_capacity_pct"][sid] / 100)
             site_util.append({"site": sid, "process": "Grinding", "module": module, "used_mt": output,
-                              "nameplate_mtpa": mod["grinding_mtpa"], "utilization": output/mod["grinding_mtpa"]})
+                              "nameplate_mtpa": nameplate, "utilization": output/nameplate})
     breakdown = {"Annualized capex + fixed opex": float(fixed), "Limestone": float(limestone),
                  "Cement freight": float(cement_freight), "Clinker freight": float(clinker_freight)}
     total = sum(breakdown.values())
@@ -337,11 +357,14 @@ def solve(cfg: dict[str, Any], data: dict[str, Any] | None = None,
         "split_share": sum(e["mt"] for e in cement_g)/cement_mt if cement_mt else 0,
         "max_utilization": max((u["utilization"] for u in site_util), default=0),
         "installed_clinker_mtpa": sum(data["integrated_modules"][MODULES.index(v)]["clinker_mtpa"]
-                                        for v in chosen_i.values() if v != "Closed"),
+                                        * (1 + cfg["integrated_clinker_capacity_pct"][sid] / 100)
+                                        for sid, v in chosen_i.items() if v != "Closed"),
         "installed_grinding_mtpa": sum(data["integrated_modules"][MODULES.index(v)]["grinding_mtpa"]
-                                         for v in chosen_i.values() if v != "Closed")
+                                         * (1 + cfg["integrated_grinding_capacity_pct"][sid] / 100)
+                                         for sid, v in chosen_i.items() if v != "Closed")
         + sum(data["split_modules"][MODULES.index(v)]["grinding_mtpa"]
-              for v in chosen_g.values() if v != "Closed"),
+              * (1 + cfg["split_grinding_capacity_pct"][sid] / 100)
+              for sid, v in chosen_g.items() if v != "Closed"),
         "diagnostics": [],
     }
     return result
